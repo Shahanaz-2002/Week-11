@@ -1,60 +1,170 @@
-# 🏥 Clinical Insight Engine API
-
-## Project Overview
-
-The Clinical Insight Engine is an AI-powered decision-support system designed to analyze medical complaints—specifically focused on Dermatology. It uses BioClinicalBERT (a transformer-based NLP model) to understand complex medical descriptions and compare them against historical cases stored in MongoDB.
-
-The system provides three key outputs for every query:
-
-* **Suggested Resolution:** A predicted category and action plan based on past successes.
-* **Confidence Score:** A mathematical reliability metric (0.0 to 1.0).
-* **Analysis Explanation:** A human-readable breakdown of why the AI made that specific choice.
+# 🏥 Clinical Match API
 
 ---
 
-## 📂 Project Structure
+# 📌 Project Overview
 
-To ensure the code runs correctly, organize your files as follows:
+The Clinical Match API is an AI-powered clinical similarity matching and recommendation system designed to intelligently analyze patient clinical inputs and retrieve the most relevant historical patient cases.
 
+The system dynamically processes available patient information and performs semantic similarity matching using transformer-based embeddings and cosine similarity retrieval techniques.
+
+The API is designed to support:
+- AI-assisted clinical recommendations
+- Clinical decision support systems
+- Patient similarity analysis
+- Intelligent healthcare assistance pipelines
+
+---
+
+# 🎯 Core Features
+
+The Clinical Match API provides:
+
+✅ Dynamic optional field processing
+
+✅ AI-powered semantic similarity matching
+
+✅ Intelligent clinical context generation
+
+✅ Top 2 similar patient case retrieval
+
+✅ Recommended tests and medicines
+
+✅ Confidence score generation
+
+✅ Human-readable AI explanations
+
+✅ Partial input handling
+
+---
+
+# 🧠 How the AI Works
+
+The system processes patient inputs through multiple AI stages.
+
+---
+
+## 1. Clinical Context Generation
+
+Available clinical fields are dynamically combined into a meaningful clinical summary.
+
+### Example
+
+Input:
+
+```json
+{
+  "chief_complaint": "Right knee pain",
+  "occupation": "Construction Worker",
+  "age": 35
+}
 ```
-api/
-  main.py                  # The FastAPI entry point where the server starts.
 
-models/
-  models.py               # Defines the data structure for requests and responses.
+Generated Clinical Context:
 
-services/
-  analyze_service.py      # Orchestrates the entire AI pipeline logic.
-
-retrieval/
-  database.py             # MongoDB connection and fetching.
-  embedding.py            # BioClinicalBERT model implementation.
-  retrieval_engine.py     # Cosine similarity search logic.
-
-insight/
-  confidence_engine.py    # Calculates the reliability score.
-  insight_aggregator.py   # Weights the final resolution.
-  explanation_generator.py # Creates the text summary.
-
-config.py                 # Centralized settings (Database names, AI parameters like TOP_K).
-utils.py                  # A migration tool to load initial data from CSV to MongoDB.
+```text
+35 year old construction worker presenting with right knee pain.
 ```
 
 ---
 
-## 🛠️ Setup and Installation
+## 2. Vector Embedding Generation
 
-### 1. Prerequisites
+The generated clinical context is converted into vector embeddings using transformer-based NLP models.
 
-* Python 3.10+
-* MongoDB: Ensure MongoDB is installed and running on localhost:27017.
-* Dermatology Dataset: A CSV file (e.g., dermatology_cases.csv) containing historical case descriptions.
+Recommended embedding models:
+- Sentence Transformers
+- BioClinicalBERT
+- BioBERT
 
 ---
 
-### 2. Install Dependencies
+## 3. Similarity Retrieval
 
-Open your terminal in the root folder and run:
+The system compares the patient embedding against historical patient embeddings using:
+
+### Cosine Similarity
+
+```text
+Higher similarity score → More clinically relevant match
+```
+
+---
+
+## 4. Recommendation Generation
+
+The top matched patient cases are analyzed to retrieve:
+- Recommended tests
+- Recommended medicines
+- Doctor notes
+- Similar clinical observations
+
+---
+
+# 📂 Project Structure
+
+Organize the project files as follows:
+
+```text
+clinical_match_api/
+│
+├── api/
+│   └── main.py
+│
+├── models/
+│   └── models.py
+│
+├── services/
+│   ├── clinical_match_service.py
+│   └── context_builder.py
+│
+├── retrieval/
+│   ├── database.py
+│   ├── embedding.py
+│   ├── embedding_store.py
+│   └── retrieval_engine.py
+│
+├── insight/
+│   ├── confidence_engine.py
+│   ├── insight_aggregator.py
+│   └── explanation_generator.py
+│
+├── datasets/
+│   └── patient_cases.json
+│
+├── tests/
+│   └── test_api_simulation.py
+│
+├── exports/
+│   └── postman_collection.json
+│
+├── api_contract.md
+├── requirements.txt
+├── README.md
+├── config.py
+└── utils.py
+```
+
+---
+
+# 🛠️ Setup and Installation
+
+# 1. Prerequisites
+
+Ensure the following are installed:
+
+- Python 3.10+
+- MongoDB (optional for database storage)
+- pip
+- Virtual environment (recommended)
+
+---
+
+# 2. Install Dependencies
+
+Open terminal inside the project root directory.
+
+Run:
 
 ```bash
 pip install -r requirements.txt
@@ -62,61 +172,191 @@ pip install -r requirements.txt
 
 ---
 
-### 3. Database Preparation 
+# 3. Dataset Preparation
 
-Before the API can find "similar cases," you must load data into MongoDB:
+Historical patient cases are required for similarity matching.
 
-* Ensure your CSV is in the root directory.
-
-* Run the utility script to migrate data:
-
-```bash
-python utils.py
-```
-
-* Generate the AI embeddings (vectors) for the historical cases:
-
-```bash
-python -m retrieval.embedding_store
-```
+You can:
+- Use JSON datasets
+- Use MongoDB
+- Generate synthetic patient cases
 
 ---
 
-## 🚀 Running the API (The Demo)
-
-### Step 1: Start the Server
-
-Run the following command from the root directory:
-
-```bash
-python -m api.main
-```
-
-* API URL: http://localhost:8000
-* Swagger UI (Interactive Docs): http://localhost:8000/docs
-
----
-
-### Step 2: Sending a Request
-
-You can use the provided simulation script or curl.
-
-#### Sample JSON Payload:
+## Example Dataset Entry
 
 ```json
 {
-  "customer_id": "CUST-5582",
-  "case_description": "Patient reports itchy red patches on the elbow that appear scaly.",
-  "location": "Tamil Nadu",
-  "category": "Skin Condition"
+  "case_id": "CASE_001",
+
+  "chief_complaint": "Lower back pain",
+
+  "affected_body_part": "Lower Back",
+
+  "recommended_tests": [
+    "MRI"
+  ],
+
+  "recommended_medicines": [
+    "Ibuprofen"
+  ]
 }
 ```
 
 ---
 
-### Step 3: Automated Testing
+# 4. Generate Embeddings
 
-To demonstrate the system's stability and error handling (Day 3 & 5 tasks), run:
+Before similarity matching, embeddings must be generated for historical patient cases.
+
+Run:
+
+```bash
+python -m retrieval.embedding_store
+```
+
+This creates vector embeddings for all stored patient records.
+
+---
+
+# 🚀 Running the API
+
+# Step 1 — Start the Server
+
+Run:
+
+```bash
+python -m api.main
+```
+
+---
+
+# API URLs
+
+| Service | URL |
+|---|---|
+| API Base URL | http://localhost:8000 |
+| Swagger Documentation | http://localhost:8000/docs |
+| ReDoc Documentation | http://localhost:8000/redoc |
+| Health Check | http://localhost:8000/health |
+
+---
+
+# Step 2 — Send API Request
+
+You can test the API using:
+- Postman
+- Swagger UI
+- Insomnia
+- curl
+- Automated test scripts
+
+---
+
+# 📥 Example API Request
+
+## Full Clinical Input
+
+```json
+{
+  "chief_complaint": "Right knee pain while climbing stairs",
+
+  "affected_body_part": "Right Knee",
+
+  "symptoms_duration": "3 weeks",
+
+  "previous_injuries": "ACL tear 2 years ago",
+
+  "current_medications": "Ibuprofen",
+
+  "allergies": "Penicillin",
+
+  "occupation": "Construction Worker",
+
+  "activity_levels": "High",
+
+  "gender": "Male",
+
+  "age": 35,
+
+  "doctor_name": "Dr Kumar",
+
+  "subjective_assessment":
+    "Pain increases during movement",
+
+  "functional_assessment":
+    "Difficulty squatting",
+
+  "physical_examination":
+    "Swelling near patella",
+
+  "objective_findings":
+    "Reduced range of motion",
+
+  "patient_pain_classification":
+    "Moderate"
+}
+```
+
+---
+
+# 📤 Example API Response
+
+```json
+{
+  "status": "success",
+
+  "message":
+    "Top matching patient cases retrieved successfully",
+
+  "matches": [
+    {
+      "case_id": "CASE_102",
+
+      "match_score": 0.91,
+
+      "chief_complaint":
+        "Knee pain during walking",
+
+      "affected_body_part":
+        "Right Knee",
+
+      "recommended_tests": [
+        "MRI",
+        "X-Ray"
+      ],
+
+      "recommended_medicines": [
+        "Ibuprofen",
+        "Muscle Relaxant"
+      ],
+
+      "doctor_notes":
+        "Possible ligament strain with inflammation"
+    }
+  ],
+
+  "confidence_score": 0.89,
+
+  "generated_clinical_context":
+    "35 year old male construction worker presenting with right knee pain.",
+
+  "explanation":
+    "Matches were retrieved using semantic similarity analysis."
+}
+```
+
+---
+
+# 🧪 Automated API Testing
+
+To test:
+- API stability
+- Validation handling
+- Partial inputs
+- Edge cases
+
+Run:
 
 ```bash
 python tests/test_api_simulation.py
@@ -124,26 +364,150 @@ python tests/test_api_simulation.py
 
 ---
 
-## 💡 How the AI Works
+# ✅ Supported Test Cases
 
-* **Vectorization:** Your input text is converted into a 768-dimensional vector using the BioClinicalBERT model.
+The automated test script validates:
 
-* **Retrieval:** The system calculates the Cosine Similarity between your query and every case in the database.
-
-* **Scoring:** The Confidence Engine evaluates the results:
-
-$$
-Confidence = (0.75 \times \text{Similarity}) + (0.25 \times \text{Support Ratio})
-$$
-
-* **Aggregation:** The Insight Aggregator performs a weighted vote among the top 3 matches to decide the final suggested resolution.
+| Test Scenario | Purpose |
+|---|---|
+| Full Input | Complete clinical request |
+| Partial Input | Missing optional fields |
+| Single Field Input | Minimal clinical data |
+| Invalid Age | Validation testing |
+| Empty Request | Error handling |
+| Long Input | Stress testing |
+| Null Fields | Optional field validation |
 
 ---
 
-## ⚠️ Error Handling
+# ⚠️ Error Handling
 
-* **422 Unprocessable Entity:** Triggered if customer_id is missing or case_description is shorter than 10 characters.
+# 1. Empty Request Error
 
-* **404 Not Found:** Triggered if no similar cases are found in the database.
+Triggered when no clinical fields are provided.
 
-* **500 Internal Server Error:** Triggered if the AI model fails to load or the database is disconnected.
+```json
+{
+  "detail": {
+    "error": "Invalid Input",
+    "message": "At least one clinical field is required"
+  }
+}
+```
+
+---
+
+# 2. Validation Error
+
+Triggered when invalid field values are provided.
+
+Example:
+- age > 120
+- invalid data type
+
+---
+
+# 3. No Similar Cases Found
+
+Triggered when no matching patient cases exist.
+
+```json
+{
+  "detail": {
+    "error": "No Results",
+    "message": "No similar patient cases found"
+  }
+}
+```
+
+---
+
+# 4. Internal Server Error
+
+Triggered when:
+- model loading fails
+- embedding generation fails
+- database connection fails
+
+```json
+{
+  "detail": {
+    "error": "Internal Server Error",
+    "message": "Error occurred while processing clinical request"
+  }
+}
+```
+
+---
+
+# 📊 AI Similarity Pipeline
+
+```text
+Patient Clinical Input
+            ↓
+Dynamic Context Builder
+            ↓
+Transformer Embedding Model
+            ↓
+Vector Embedding
+            ↓
+Cosine Similarity Search
+            ↓
+Top Matching Cases
+            ↓
+Recommendation Generation
+            ↓
+Final API Response
+```
+
+---
+
+# 🧰 Technology Stack
+
+| Component | Technology |
+|---|---|
+| Backend Framework | FastAPI |
+| AI Embeddings | Sentence Transformers |
+| Similarity Engine | Cosine Similarity |
+| Validation | Pydantic |
+| API Documentation | Swagger UI |
+| Testing | Postman |
+| Programming Language | Python |
+
+---
+
+# 📈 Future Enhancements
+
+Planned future improvements include:
+
+- FAISS vector similarity search
+- BioClinicalBERT integration
+- Multi-patient recommendation ranking
+- Clinical risk scoring
+- Real-time database retrieval
+- Recommendation explainability engine
+- Medical ontology integration
+- Multi-specialty support
+- Temporal patient tracking
+
+---
+
+# 👩‍⚕️ Clinical Match API Goals
+
+The long-term goal of this system is to provide:
+- Faster clinical decision assistance
+- AI-supported patient analysis
+- Intelligent healthcare retrieval systems
+- Scalable medical recommendation architectures
+
+---
+
+# 📄 License
+
+This project is intended for:
+- Research
+- Educational purposes
+- AI healthcare experimentation
+- Clinical recommendation system development
+
+---

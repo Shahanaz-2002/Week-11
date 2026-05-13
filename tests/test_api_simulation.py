@@ -3,7 +3,11 @@ import json
 import time
 import uuid
 
-API_URL = "http://127.0.0.1:8000/ai/analyze-case" # Adjusted to match main.py route if applicable, or leave as /analyze-case
+# =========================
+# API CONFIGURATION
+# =========================
+
+API_URL = "http://127.0.0.1:8000/clinical/match"
 
 
 # =========================
@@ -11,101 +15,160 @@ API_URL = "http://127.0.0.1:8000/ai/analyze-case" # Adjusted to match main.py ro
 # =========================
 
 def print_divider():
-    print("=" * 60)
+    print("=" * 80)
 
 
-def generate_customer_id():
-    return f"CUST-{uuid.uuid4().hex[:6].upper()}"
+def generate_request_id():
+    return f"REQ-{uuid.uuid4().hex[:8].upper()}"
 
 
-def add_customer_id(payload):
-    # Only auto-generate if the test isn't intentionally leaving it blank
-    if "customer_id" not in payload:
-        payload["customer_id"] = generate_customer_id()
-    return payload
+# =========================
+# SUCCESS RESPONSE VALIDATION
+# =========================
 
-
-# 🔹 SUCCESS RESPONSE VALIDATION
 def validate_success_response(data):
+
     required_fields = [
-        "suggested_resolution",
-        "similar_cases",
+        "status",
+        "message",
+        "matches",
         "confidence_score",
+        "generated_clinical_context",
         "explanation"
     ]
 
-    # Check fields exist
+    # ---------------- FIELD CHECK ----------------
     for field in required_fields:
+
         if field not in data:
             return False, f"Missing field: {field}"
 
-    # Type checks
-    if not isinstance(data["similar_cases"], list):
-        return False, "similar_cases should be a list"
+    # ---------------- TYPE CHECKS ----------------
+    if not isinstance(data["matches"], list):
+        return False, "matches should be a list"
+
+    if not isinstance(data["confidence_score"], (float, int)):
+        return False, "confidence_score should be numeric"
 
     if not (0.0 <= data["confidence_score"] <= 1.0):
         return False, "confidence_score out of range"
 
-    if not isinstance(data["suggested_resolution"], str):
-        return False, "suggested_resolution should be a string"
+    # ---------------- MATCH STRUCTURE CHECK ----------------
+    for match in data["matches"]:
+
+        required_match_fields = [
+            "case_id",
+            "match_score",
+            "recommended_tests",
+            "recommended_medicines"
+        ]
+
+        for field in required_match_fields:
+
+            if field not in match:
+                return False, f"Missing match field: {field}"
 
     return True, "Valid response structure"
 
 
-# 🔹 ERROR RESPONSE VALIDATION
+# =========================
+# ERROR RESPONSE VALIDATION
+# =========================
+
 def validate_error_response(data):
+
     if "detail" not in data:
-        return False, "Missing 'detail' in error response"
+        return False, "Missing 'detail' field"
+
     return True, "Valid error response"
 
 
-def send_request(payload, test_name, expected_status):
-    print_divider()
-    print(f"TEST: {test_name}")
+# =========================
+# REQUEST SENDER
+# =========================
 
-    payload = add_customer_id(payload)
+def send_request(payload, test_name, expected_status):
+
+    print_divider()
+
+    print(f"TEST NAME : {test_name}")
+
+    request_id = generate_request_id()
+
+    print(f"REQUEST ID : {request_id}")
 
     start_time = time.time()
 
     try:
-        response = requests.post(API_URL, json=payload)
-        response_time = round((time.time() - start_time) * 1000, 2)
 
-        print(f"Status Code: {response.status_code}")
-        print(f"Response Time: {response_time} ms")
+        response = requests.post(
+            API_URL,
+            json=payload
+        )
+
+        response_time = round(
+            (time.time() - start_time) * 1000,
+            2
+        )
+
+        print(f"STATUS CODE : {response.status_code}")
+
+        print(f"RESPONSE TIME : {response_time} ms")
 
         try:
+
             data = response.json()
-            print("Response JSON:")
+
+            print("\nRESPONSE JSON:")
+
             print(json.dumps(data, indent=4))
+
         except Exception:
-            print("FAIL: Invalid JSON response")
+
+            print("FAIL : Invalid JSON response")
+
             return False
 
-        # 🔹 STATUS CHECK
+        # ---------------- STATUS CHECK ----------------
         if response.status_code != expected_status:
-            print(f"FAIL: Expected {expected_status}, got {response.status_code}")
+
+            print(
+                f"FAIL : Expected {expected_status}, "
+                f"got {response.status_code}"
+            )
+
             return False
 
-        # 🔹 SUCCESS VALIDATION
+        # ---------------- SUCCESS VALIDATION ----------------
         if response.status_code == 200:
+
             is_valid, message = validate_success_response(data)
+
             if not is_valid:
-                print(f"FAIL: {message}")
+
+                print(f"FAIL : {message}")
+
                 return False
 
-        # 🔹 ERROR VALIDATION
+        # ---------------- ERROR VALIDATION ----------------
         else:
+
             is_valid, message = validate_error_response(data)
+
             if not is_valid:
-                print(f"FAIL: {message}")
+
+                print(f"FAIL : {message}")
+
                 return False
 
         print("PASS")
+
         return True
 
     except Exception as e:
-        print(f"ERROR: Request failed -> {e}")
+
+        print(f"ERROR : Request failed -> {e}")
+
         return False
 
 
@@ -115,66 +178,152 @@ def send_request(payload, test_name, expected_status):
 
 test_cases = [
 
-    # VALID CASE
+    # ==================================================
+    # FULL VALID INPUT
+    # ==================================================
     {
-        "name": "Valid CCMS Case",
+        "name": "Full Clinical Input",
+
         "payload": {
-            "case_description": "The login portal crashes every time I try to reset my password.",
-            "location": "New York",
-            "category": "Technical Issue"
+            "chief_complaint": "Right knee pain while climbing stairs",
+
+            "affected_body_part": "Right Knee",
+
+            "symptoms_duration": "3 weeks",
+
+            "previous_injuries": "ACL tear 2 years ago",
+
+            "current_medications": "Ibuprofen",
+
+            "allergies": "Penicillin",
+
+            "occupation": "Construction Worker",
+
+            "activity_levels": "High",
+
+            "gender": "Male",
+
+            "age": 35,
+
+            "doctor_name": "Dr Kumar",
+
+            "subjective_assessment":
+                "Pain increases during movement",
+
+            "functional_assessment":
+                "Difficulty squatting",
+
+            "physical_examination":
+                "Swelling near patella",
+
+            "objective_findings":
+                "Reduced range of motion",
+
+            "patient_pain_classification":
+                "Moderate"
         },
+
         "expected_status": 200
     },
 
-    # EMPTY CASE DESCRIPTION
+    # ==================================================
+    # PARTIAL INPUT
+    # ==================================================
     {
-        "name": "Empty Case Description",
+        "name": "Partial Clinical Input",
+
         "payload": {
-            "case_description": "   ",
-            "location": "Chicago",
-            "category": "Billing"
+            "chief_complaint": "Lower back pain",
+
+            "occupation": "Driver",
+
+            "age": 45
         },
+
+        "expected_status": 200
+    },
+
+    # ==================================================
+    # ONLY ONE FIELD
+    # ==================================================
+    {
+        "name": "Single Input Field",
+
+        "payload": {
+            "chief_complaint": "Shoulder stiffness"
+        },
+
+        "expected_status": 200
+    },
+
+    # ==================================================
+    # ONLY AGE
+    # ==================================================
+    {
+        "name": "Only Age Provided",
+
+        "payload": {
+            "age": 60
+        },
+
+        "expected_status": 200
+    },
+
+    # ==================================================
+    # EMPTY REQUEST
+    # ==================================================
+    {
+        "name": "Empty Request",
+
+        "payload": {},
+
         "expected_status": 422
     },
 
-    # MISSING DESCRIPTION FIELD
+    # ==================================================
+    # INVALID AGE
+    # ==================================================
     {
-        "name": "Missing Description Field",
+        "name": "Invalid Age Input",
+
         "payload": {
-            "location": "Dallas",
-            "category": "General Inquiry"
+            "chief_complaint": "Neck pain",
+
+            "age": 150
         },
+
         "expected_status": 422
     },
 
-    # MISSING CUSTOMER ID
-    {
-        "name": "Missing Customer ID",
-        "payload": {
-            "customer_id": "",
-            "case_description": "My delivery was late by 3 days.",
-            "location": "Seattle"
-        },
-        "expected_status": 422
-    },
-
+    # ==================================================
     # LONG INPUT
+    # ==================================================
     {
-        "name": "Long Case Description",
+        "name": "Long Clinical Description",
+
         "payload": {
-            "case_description": "I have been trying to reach support for hours. " * 50,
-            "location": "Boston",
-            "category": "Customer Support"
+            "subjective_assessment":
+                "Patient reports chronic lower back pain "
+                * 30
         },
+
         "expected_status": 200
     },
 
-    # MINIMAL VALID INPUT (Only required fields)
+    # ==================================================
+    # NULL FIELDS
+    # ==================================================
     {
-        "name": "Minimal Valid Input",
+        "name": "Null Optional Fields",
+
         "payload": {
-            "case_description": "Refund not processed."
+            "chief_complaint": None,
+
+            "occupation": None,
+
+            "age": 32
         },
+
         "expected_status": 200
     }
 ]
@@ -185,14 +334,17 @@ test_cases = [
 # =========================
 
 if __name__ == "__main__":
-    print("\nStarting CCMS Integration Simulation...\n")
+
+    print("\nStarting Clinical Match API Simulation...\n")
 
     passed = 0
+
     failed = 0
 
     results_summary = []
 
     for test in test_cases:
+
         result = send_request(
             payload=test["payload"],
             test_name=test["name"],
@@ -200,21 +352,45 @@ if __name__ == "__main__":
         )
 
         if result:
+
             passed += 1
-            results_summary.append({"test": test["name"], "status": "PASS"})
+
+            results_summary.append({
+                "test": test["name"],
+                "status": "PASS"
+            })
+
         else:
+
             failed += 1
-            results_summary.append({"test": test["name"], "status": "FAIL"})
+
+            results_summary.append({
+                "test": test["name"],
+                "status": "FAIL"
+            })
 
     print_divider()
-    print("FINAL SUMMARY")
-    print(f"Total Tests: {len(test_cases)}")
-    print(f"Passed: {passed}")
-    print(f"Failed: {failed}")
 
-    # SAVE RESULTS
+    print("FINAL SUMMARY")
+
+    print(f"TOTAL TESTS : {len(test_cases)}")
+
+    print(f"PASSED      : {passed}")
+
+    print(f"FAILED      : {failed}")
+
+    # =========================
+    # SAVE TEST RESULTS
+    # =========================
+
     with open("test_results.json", "w") as f:
-        json.dump(results_summary, f, indent=4)
+
+        json.dump(
+            results_summary,
+            f,
+            indent=4
+        )
 
     print("\nResults saved to test_results.json")
-    print("CCMS Simulation Completed!")
+
+    print("Clinical Match API Simulation Completed!")
