@@ -1,121 +1,196 @@
 import time
 from fastapi import HTTPException
 
-from models.models import SimilarCase
-
 from retrieval.retrieval_engine import retrieve_similar_cases
 from retrieval.database import fetch_case_database
-
-from insight.insight_aggregator import InsightAggregator
-from insight.confidence_engine import ConfidenceEngine
-from insight.explanation_generator import ExplanationGenerator
 
 from config import TOP_K
 
 
 # =========================================================
-# INITIALIZE COMPONENTS
+# LOAD CASE DATABASE
 # =========================================================
 
 try:
+
     case_database = fetch_case_database()
+
 except Exception:
+
     case_database = []
 
 
-insight_aggregator = InsightAggregator()
-confidence_engine = ConfidenceEngine()
-explanation_generator = ExplanationGenerator()
-
-
 # =========================================================
 # HELPER FUNCTION:
-# BUILD DERMATOLOGY QUERY
+# BUILD SEARCH QUERY
 # =========================================================
 
-def build_dermatology_query(request):
+def build_search_query(request):
 
     query_parts = []
 
-    if request.chief_complaint:
-        query_parts.append(request.chief_complaint)
+    weighted_fields = [
 
-    if request.symptoms:
-        query_parts.append(request.symptoms)
+        request.chief_complaint,
+        request.affected_body_part,
+        request.symptoms,
+        request.subjective_assessment,
+        request.physical_examination,
+        request.objective_findings,
+        request.patient_pain_classification,
+        request.previous_injuries,
+        request.functional_assessment
+    ]
 
-    if request.physical_examination:
-        query_parts.append(request.physical_examination)
+    for field in weighted_fields:
 
-    if request.objective_findings:
-        query_parts.append(request.objective_findings)
+        if field not in [None, ""]:
 
-    if request.patient_pain_classification:
-        query_parts.append(request.patient_pain_classification)
+            query_parts.append(field)
 
-    return " | ".join(query_parts)
+    return " | ".join(query_parts).strip()
 
 
 # =========================================================
 # HELPER FUNCTION:
-# BUILD DERMATOLOGY CONTEXT
+# BUILD CLINICAL CONTEXT
 # =========================================================
 
-def build_dermatology_context(request):
+def build_clinical_context(request):
 
     context_parts = []
 
-    if request.age:
-        context_parts.append(f"Age: {request.age}")
+    field_mapping = {
 
-    if request.gender:
-        context_parts.append(f"Gender: {request.gender}")
+        "Age": request.age,
+        "Gender": request.gender,
+        "Occupation": request.occupation,
+        "Activity Levels": request.activity_levels,
+        "Chief Complaint": request.chief_complaint,
+        "Affected Body Part": request.affected_body_part,
+        "Symptoms Duration": request.symptoms_duration,
+        "Previous Injuries": request.previous_injuries,
+        "Current Medications": request.current_medications,
+        "Allergies": request.allergies,
+        "Subjective Assessment": request.subjective_assessment,
+        "Functional Assessment": request.functional_assessment,
+        "Physical Examination": request.physical_examination,
+        "Objective Findings": request.objective_findings,
+        "Pain Classification": request.patient_pain_classification,
+        "Symptoms": request.symptoms,
+        "Doctor Notes": request.doctor_notes,
+        "Clinical History": request.clinical_history,
+        "Doctor Name": request.doctor_name
+    }
 
-    if request.chief_complaint:
-        context_parts.append(
-            f"Chief Complaint: {request.chief_complaint}"
-        )
+    for field_name, value in field_mapping.items():
 
-    if request.symptoms_duration:
-        context_parts.append(
-            f"Symptoms Duration: {request.symptoms_duration}"
-        )
+        if value not in [None, "", [], {}]:
 
-    if request.previous_injuries:
-        context_parts.append(
-            f"Previous Skin History: {request.previous_injuries}"
-        )
-
-    if request.current_medications:
-        context_parts.append(
-            f"Current Medications: {request.current_medications}"
-        )
-
-    if request.allergies:
-        context_parts.append(
-            f"Allergies: {request.allergies}"
-        )
-
-    if request.subjective_assessment:
-        context_parts.append(
-            f"Subjective Assessment: {request.subjective_assessment}"
-        )
-
-    if request.physical_examination:
-        context_parts.append(
-            f"Physical Examination: {request.physical_examination}"
-        )
-
-    if request.objective_findings:
-        context_parts.append(
-            f"Objective Findings: {request.objective_findings}"
-        )
-
-    if request.doctor_notes:
-        context_parts.append(
-            f"Doctor Notes: {request.doctor_notes}"
-        )
+            context_parts.append(
+                f"{field_name}: {value}"
+            )
 
     return "\n".join(context_parts)
+
+
+# =========================================================
+# HELPER FUNCTION:
+# GENERATE RECOMMENDATIONS
+# =========================================================
+
+def generate_recommendations(case):
+
+    recommendations = {
+
+        "recommended_tests": [],
+        "recommended_medicines": []
+    }
+
+    complaint = str(
+        case.get("chief_complaint", "")
+    ).lower()
+
+    # -----------------------------------------------------
+    # KNEE RELATED
+    # -----------------------------------------------------
+
+    if "knee" in complaint:
+
+        recommendations["recommended_tests"] = [
+            "X-Ray",
+            "MRI Knee",
+            "Physical Stability Test"
+        ]
+
+        recommendations["recommended_medicines"] = [
+            "Ibuprofen",
+            "Paracetamol"
+        ]
+
+    # -----------------------------------------------------
+    # BACK PAIN
+    # -----------------------------------------------------
+
+    elif "back" in complaint:
+
+        recommendations["recommended_tests"] = [
+            "Spine MRI",
+            "Posture Assessment"
+        ]
+
+        recommendations["recommended_medicines"] = [
+            "Diclofenac",
+            "Muscle Relaxant"
+        ]
+
+    # -----------------------------------------------------
+    # SHOULDER PAIN
+    # -----------------------------------------------------
+
+    elif "shoulder" in complaint:
+
+        recommendations["recommended_tests"] = [
+            "Shoulder MRI",
+            "Rotator Cuff Examination"
+        ]
+
+        recommendations["recommended_medicines"] = [
+            "Naproxen",
+            "Pain Relief Gel"
+        ]
+
+    # -----------------------------------------------------
+    # DEFAULT
+    # -----------------------------------------------------
+
+    else:
+
+        recommendations["recommended_tests"] = [
+            "Clinical Evaluation"
+        ]
+
+        recommendations["recommended_medicines"] = [
+            "General Pain Management"
+        ]
+
+    return recommendations
+
+
+# =========================================================
+# HELPER FUNCTION:
+# CONFIDENCE LEVEL
+# =========================================================
+
+def get_confidence_level(score):
+
+    if score >= 0.85:
+        return "High"
+
+    if score >= 0.60:
+        return "Moderate"
+
+    return "Low"
 
 
 # =========================================================
@@ -141,27 +216,40 @@ def clinical_match_pipeline(
         # =================================================
 
         if not search_query:
-            search_query = build_dermatology_query(request)
+
+            search_query = build_search_query(
+                request
+            )
 
         if not generated_context:
-            generated_context = build_dermatology_context(request)
+
+            generated_context = build_clinical_context(
+                request
+            )
 
         if not combined_symptoms:
-            combined_symptoms = (
-                f"{request.chief_complaint} "
-                f"{request.subjective_assessment} "
-                f"{request.objective_findings}"
-            ).strip()
+
+            combined_symptoms = " ".join([
+
+                str(request.chief_complaint),
+
+                str(request.subjective_assessment),
+
+                str(request.objective_findings),
+
+                str(request.symptoms)
+
+            ]).strip()
 
         # =================================================
-        # EMPTY QUERY CHECK
+        # EMPTY QUERY VALIDATION
         # =================================================
 
         if not search_query.strip():
 
             raise HTTPException(
                 status_code=400,
-                detail="Dermatology clinical query is empty"
+                detail="Clinical search query is empty"
             )
 
         # =================================================
@@ -173,7 +261,7 @@ def clinical_match_pipeline(
             log_event(
                 "input_processed",
                 request_id,
-                "Dermatology input processed successfully",
+                "Clinical input processed successfully",
                 {
                     "search_query": search_query
                 }
@@ -185,9 +273,12 @@ def clinical_match_pipeline(
 
         try:
 
-            top_matches = retrieve_similar_cases(
+            retrieved_cases = retrieve_similar_cases(
+
                 query_text=search_query,
+
                 case_database=case_database,
+
                 top_k=TOP_K
             )
 
@@ -198,7 +289,7 @@ def clinical_match_pipeline(
                 log_event(
                     "retrieval_error",
                     request_id,
-                    "Dermatology retrieval failed",
+                    "Similarity retrieval failed",
                     {
                         "error": str(e)
                     }
@@ -206,96 +297,152 @@ def clinical_match_pipeline(
 
             raise HTTPException(
                 status_code=500,
-                detail="Error during dermatology similarity retrieval"
+                detail="Error during clinical similarity retrieval"
             )
 
         # =================================================
         # NO MATCH FOUND
         # =================================================
 
-        if not top_matches:
-
-            if log_event:
-
-                log_event(
-                    "no_matches",
-                    request_id,
-                    "No similar dermatology cases found"
-                )
+        if not retrieved_cases:
 
             return {
-                "suggested_resolution": (
-                    "No similar dermatology cases found.\n"
-                    "Recommended Action: Manual dermatologist review suggested."
-                ),
 
-                "similar_cases": [],
+                "status": "No Match",
+
+                "message":
+                    "No similar clinical cases found",
+
+                "matches": [],
+
+                "total_matches_found": 0,
 
                 "confidence_score": 0.0,
 
-                "explanation": (
-                    "No dermatology matches found.\n"
-                    "Reason: Insufficient historical dermatology data.\n"
-                    "Recommendation: Proceed with expert dermatologist analysis."
-                )
+                "generated_context":
+                    generated_context,
+
+                "explanation":
+                    "No relevant historical cases available"
             }
 
         # =================================================
-        # LOG RETRIEVAL SUCCESS
+        # TOP 2 MATCHES ONLY
         # =================================================
 
-        if log_event:
-
-            log_event(
-                "retrieval_completed",
-                request_id,
-                "Dermatology cases retrieved successfully",
-                {
-                    "num_cases": len(top_matches)
-                }
-            )
+        top_matches = retrieved_cases[:2]
 
         # =================================================
-        # FORMAT SIMILAR CASES
+        # FORMAT MATCHES
         # =================================================
 
-        similar_cases_formatted = []
+        formatted_matches = []
 
-        for c in top_matches:
+        for case in top_matches:
 
             try:
 
-                formatted_case = SimilarCase(
-
-                    case_id=str(
-                        c.get("case_id", "Unknown")
-                    ),
-
-                    similarity_score=max(
-                        0.0,
-                        min(
-                            1.0,
-                            float(c.get("similarity", 0.0))
+                similarity_score = round(
+                    float(
+                        case.get(
+                            "similarity",
+                            0.0
                         )
                     ),
-
-                    category=c.get(
-                        "category",
-                        "Dermatology"
-                    ) or "Dermatology",
-
-                    location=c.get(
-                        "location",
-                        "Unknown"
-                    ) or "Unknown",
-
-                    resolution_notes=c.get(
-                        "resolution_notes",
-                        "No dermatologist notes available"
-                    ) or "No dermatologist notes available"
+                    4
                 )
 
-                similar_cases_formatted.append(
+                recommendations = (
+                    generate_recommendations(
+                        case
+                    )
+                )
+
+                matched_keywords = []
+
+                complaint = str(
+                    case.get(
+                        "chief_complaint",
+                        ""
+                    )
+                )
+
+                if complaint:
+                    matched_keywords.append(
+                        complaint
+                    )
+
+                formatted_case = {
+
+                    "case_id":
+                        str(
+                            case.get(
+                                "case_id",
+                                "Unknown"
+                            )
+                        ),
+
+                    "match_score":
+                        max(
+                            0.0,
+                            min(
+                                1.0,
+                                similarity_score
+                            )
+                        ),
+
+                    "chief_complaint":
+                        case.get(
+                            "chief_complaint",
+                            "Unknown"
+                        ),
+
+                    "affected_body_part":
+                        case.get(
+                            "affected_body_part",
+                            "Unknown"
+                        ),
+
+                    "symptoms_duration":
+                        case.get(
+                            "symptoms_duration",
+                            "Unknown"
+                        ),
+
+                    "doctor_notes":
+                        case.get(
+                            "doctor_notes",
+                            "No notes available"
+                        ),
+
+                    "recommended_tests":
+                        recommendations[
+                            "recommended_tests"
+                        ],
+
+                    "recommended_medicines":
+                        recommendations[
+                            "recommended_medicines"
+                        ],
+
+                    "matched_keywords":
+                        matched_keywords,
+
+                    "confidence_level":
+                        get_confidence_level(
+                            similarity_score
+                        ),
+
+                    "explanation":
+                        (
+                            f"Matched based on "
+                            f"clinical similarity "
+                            f"with score "
+                            f"{similarity_score}"
+                        )
+                }
+
+                formatted_matches.append(
                     formatted_case
                 )
 
@@ -303,123 +450,29 @@ def clinical_match_pipeline(
                 continue
 
         # =================================================
-        # FORMAT FAILURE
+        # VALID FORMATTED MATCHES CHECK
         # =================================================
 
-        if not similar_cases_formatted:
-
-            if log_event:
-
-                log_event(
-                    "formatting_issue",
-                    request_id,
-                    "Retrieved dermatology cases invalid"
-                )
-
-            return {
-
-                "suggested_resolution": (
-                    "Relevant dermatology cases found "
-                    "but could not be processed."
-                ),
-
-                "similar_cases": [],
-
-                "confidence_score": 0.0,
-
-                "explanation":
-                    "Retrieved dermatology data format invalid."
-            }
-
-        # =================================================
-        # CONFIDENCE ENGINE
-        # =================================================
-
-        try:
-
-            confidence_data = (
-                confidence_engine.compute_confidence(
-                    top_matches
-                )
-            )
-
-        except Exception as e:
-
-            if log_event:
-
-                log_event(
-                    "confidence_error",
-                    request_id,
-                    "Confidence calculation failed",
-                    {
-                        "error": str(e)
-                    }
-                )
-
-            confidence_data = {
-                "confidence_score": 0.0
-            }
-
-        # =================================================
-        # EXPLANATION GENERATION
-        # =================================================
-
-        try:
-
-            explanation = (
-                explanation_generator.generate_explanation(
-                    top_matches
-                )
-            )
-
-        except Exception as e:
-
-            if log_event:
-
-                log_event(
-                    "explanation_error",
-                    request_id,
-                    "Explanation generation failed",
-                    {
-                        "error": str(e)
-                    }
-                )
-
-            explanation = (
-                "Dermatology explanation could not be generated."
-            )
-
-        # =================================================
-        # INSIGHT AGGREGATION
-        # =================================================
-
-        try:
-
-            final_insight = (
-                insight_aggregator.aggregate_insights(
-                    top_matches=top_matches,
-                    explanation=explanation,
-                    confidence_data=confidence_data
-                )
-            )
-
-        except Exception as e:
-
-            if log_event:
-
-                log_event(
-                    "aggregation_error",
-                    request_id,
-                    "Insight aggregation failed",
-                    {
-                        "error": str(e)
-                    }
-                )
+        if len(formatted_matches) == 0:
 
             raise HTTPException(
                 status_code=500,
-                detail="Error during dermatology insight aggregation"
+                detail="Retrieved cases could not be formatted"
             )
+
+        # =================================================
+        # OVERALL CONFIDENCE SCORE
+        # =================================================
+
+        confidence_score = round(
+
+            sum([
+                match["match_score"]
+                for match in formatted_matches
+            ]) / len(formatted_matches),
+
+            4
+        )
 
         # =================================================
         # TOTAL PROCESSING TIME
@@ -431,7 +484,7 @@ def clinical_match_pipeline(
         )
 
         # =================================================
-        # PIPELINE SUCCESS
+        # PIPELINE SUCCESS LOGGING
         # =================================================
 
         if log_event:
@@ -439,9 +492,13 @@ def clinical_match_pipeline(
             log_event(
                 "pipeline_completed",
                 request_id,
-                "Dermatology pipeline executed successfully",
+                "Clinical pipeline executed successfully",
                 {
-                    "total_time_ms": total_time
+                    "matches_found":
+                        len(formatted_matches),
+
+                    "processing_time_ms":
+                        total_time
                 }
             )
 
@@ -451,37 +508,29 @@ def clinical_match_pipeline(
 
         return {
 
-            "suggested_resolution":
+            "status":
+                "Success",
 
-                final_insight.get(
-                    "suggested_resolution",
-                    "No dermatology recommendation available"
-                ),
+            "message":
+                "Clinical similarity matching completed successfully",
 
-            "similar_cases":
-                similar_cases_formatted,
+            "matches":
+                formatted_matches,
+
+            "total_matches_found":
+                len(formatted_matches),
 
             "confidence_score":
-
-                float(
-                    final_insight.get(
-                        "confidence_score",
-                        0.0
-                    )
-                ),
-
-            "explanation":
-
-                final_insight.get(
-                    "explanation",
-                    explanation
-                ),
-
-            "search_query":
-                search_query,
+                confidence_score,
 
             "generated_context":
                 generated_context,
+
+            "explanation":
+                (
+                    "Top clinical matches generated "
+                    "using semantic similarity retrieval"
+                ),
 
             "processing_time_ms":
                 total_time
@@ -505,22 +554,29 @@ def clinical_match_pipeline(
             log_event(
                 "pipeline_error",
                 request_id,
-                "Dermatology pipeline failure",
+                "Clinical pipeline failure",
                 {
                     "error": str(e)
                 }
             )
 
         raise HTTPException(
-            status_code=500,
-            detail={
-                "suggested_resolution":
-                    "Error occurred while processing dermatology request",
 
-                "similar_cases": [],
+            status_code=500,
+
+            detail={
+
+                "status":
+                    "Failed",
+
+                "message":
+                    "Clinical pipeline execution failed",
+
+                "matches": [],
 
                 "confidence_score": 0.0,
 
-                "explanation": str(e)
+                "explanation":
+                    str(e)
             }
         )

@@ -3,6 +3,7 @@ import numpy as np
 import logging
 import json
 import time
+import re
 
 from retrieval.embedding import BioBERTEmbedding
 
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 # =========================================================
 
 try:
+
     embedder = BioBERTEmbedding()
 
 except Exception:
@@ -28,12 +30,17 @@ except Exception:
 def log_event(event_type, message, extra=None):
 
     log_data = {
+
         "event": event_type,
+
         "message": message,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+
+        "timestamp":
+            time.strftime("%Y-%m-%d %H:%M:%S")
     }
 
     if extra:
+
         log_data.update(extra)
 
     logger.info(json.dumps(log_data))
@@ -52,56 +59,65 @@ def clean_text(text):
 
     text = text.strip()
 
-    text = " ".join(text.split())
+    text = re.sub(r"\s+", " ", text)
 
     return text
 
 
 # =========================================================
-# DERMATOLOGY QUERY ENHANCEMENT
+# QUERY ENHANCEMENT
 # =========================================================
 
-def enhance_dermatology_query(query_text):
+def enhance_query(query_text):
 
     query_text = clean_text(query_text)
 
-    dermatology_keywords = [
-        "skin",
-        "lesion",
-        "rash",
-        "pigmentation",
-        "itching",
-        "acne",
-        "eczema",
-        "psoriasis",
-        "papules",
-        "pustules",
-        "hyperpigmentation"
-    ]
+    medical_keywords = [
 
-    enhanced_query = query_text
+        "pain",
+        "swelling",
+        "injury",
+        "fracture",
+        "stiffness",
+        "inflammation",
+        "weakness",
+        "mobility",
+        "muscle",
+        "joint",
+        "tenderness",
+        "sprain",
+        "posture",
+        "movement"
+    ]
 
     detected_keywords = []
 
     lower_query = query_text.lower()
 
-    for keyword in dermatology_keywords:
+    for keyword in medical_keywords:
 
         if keyword in lower_query:
+
             detected_keywords.append(keyword)
 
     if detected_keywords:
 
-        enhanced_query += " | " + " ".join(detected_keywords)
+        query_text += (
+            " | " +
+            " ".join(detected_keywords)
+        )
 
-    return enhanced_query.strip()
+    return query_text.strip()
 
 
 # =========================================================
 # COSINE SIMILARITY
 # =========================================================
 
-def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+def cosine_similarity(
+    a: np.ndarray,
+    b: np.ndarray
+) -> float:
 
     try:
 
@@ -110,9 +126,12 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
         norm_b = np.linalg.norm(b)
 
         if norm_a == 0 or norm_b == 0:
+
             return 0.0
 
-        similarity = np.dot(a, b) / (norm_a * norm_b)
+        similarity = np.dot(a, b) / (
+            norm_a * norm_b
+        )
 
         return float(similarity)
 
@@ -138,24 +157,79 @@ def build_case_search_text(case_data):
     text_parts = []
 
     fields = [
-        "case_description",
+
         "chief_complaint",
+        "affected_body_part",
         "symptoms",
         "physical_examination",
         "objective_findings",
         "doctor_notes",
-        "resolution_notes",
-        "category"
+        "clinical_history",
+        "case_description"
     ]
 
     for field in fields:
 
         value = case_data.get(field, "")
 
-        if value:
-            text_parts.append(str(value))
+        if value not in [None, ""]:
+
+            text_parts.append(
+                str(value)
+            )
 
     return " | ".join(text_parts)
+
+
+# =========================================================
+# MATCHED KEYWORD EXTRACTION
+# =========================================================
+
+def extract_matched_keywords(
+    query_text,
+    searchable_text
+):
+
+    query_words = set(
+        clean_text(query_text).lower().split()
+    )
+
+    searchable_words = set(
+        clean_text(searchable_text).lower().split()
+    )
+
+    matched = list(
+        query_words.intersection(
+            searchable_words
+        )
+    )
+
+    matched = [
+        word
+        for word in matched
+        if len(word) > 3
+    ]
+
+    return matched[:10]
+
+
+# =========================================================
+# BOOST SCORE FOR IMPORTANT MATCHES
+# =========================================================
+
+def apply_keyword_boost(
+    similarity_score,
+    matched_keywords
+):
+
+    boost = min(
+        0.10,
+        len(matched_keywords) * 0.01
+    )
+
+    boosted_score = similarity_score + boost
+
+    return min(boosted_score, 1.0)
 
 
 # =========================================================
@@ -165,7 +239,7 @@ def build_case_search_text(case_data):
 def retrieve_similar_cases(
     query_text: str,
     case_database: List[Dict],
-    top_k: int = 3
+    top_k: int = 2
 ) -> List[Dict]:
 
     start_time = time.time()
@@ -176,16 +250,19 @@ def retrieve_similar_cases(
 
     log_event(
         "retrieval_started",
-        "Dermatology retrieval started",
+        "Clinical retrieval started",
         {
-            "query_length": len(query_text)
-            if query_text else 0,
+            "query_length":
+                len(query_text)
+                if query_text else 0,
 
-            "database_size": len(case_database)
-            if isinstance(case_database, list)
-            else 0,
+            "database_size":
+                len(case_database)
+                if isinstance(case_database, list)
+                else 0,
 
-            "top_k": top_k
+            "top_k":
+                top_k
         }
     )
 
@@ -197,7 +274,7 @@ def retrieve_similar_cases(
 
         log_event(
             "validation_error",
-            "Empty dermatology query received"
+            "Empty clinical query received"
         )
 
         return []
@@ -217,7 +294,7 @@ def retrieve_similar_cases(
 
         log_event(
             "validation_error",
-            "Query became empty after cleaning"
+            "Query empty after cleaning"
         )
 
         return []
@@ -226,89 +303,78 @@ def retrieve_similar_cases(
 
         log_event(
             "validation_error",
-            "Invalid database format"
+            "Invalid case database"
         )
 
         return []
-
-    if not isinstance(top_k, int) or top_k <= 0:
-
-        log_event(
-            "top_k_warning",
-            "Invalid top_k supplied, defaulting to 3"
-        )
-
-        top_k = 3
 
     # =====================================================
     # QUERY ENHANCEMENT
     # =====================================================
 
-    enhanced_query = enhance_dermatology_query(
+    enhanced_query = enhance_query(
         query_text
     )
 
     log_event(
         "query_enhanced",
-        "Dermatology query enhanced",
+        "Clinical query enhanced",
         {
-            "enhanced_query": enhanced_query
+            "enhanced_query":
+                enhanced_query
         }
     )
 
     # =====================================================
-    # EMBEDDING VALIDATION
+    # EMBEDDER VALIDATION
     # =====================================================
 
     if embedder is None:
 
         log_event(
-            "embedding_unavailable",
-            "BioBERT embedder unavailable"
+            "embedding_error",
+            "Embedding model unavailable"
         )
 
         return []
 
     # =====================================================
-    # GENERATE QUERY EMBEDDING
+    # QUERY EMBEDDING
     # =====================================================
 
     try:
 
         embedding_start = time.time()
 
-        query_embedding = embedder.get_embedding(
-            enhanced_query
+        query_embedding = (
+            embedder.get_embedding(
+                enhanced_query
+            )
         )
 
         if query_embedding is None:
 
-            log_event(
-                "embedding_failure",
-                "Query embedding generation failed"
-            )
-
             return []
 
-        query_embedding = np.array(query_embedding)
+        query_embedding = np.array(
+            query_embedding
+        )
 
         if query_embedding.size == 0:
-
-            log_event(
-                "embedding_failure",
-                "Empty query embedding generated"
-            )
 
             return []
 
         embedding_time = round(
-            (time.time() - embedding_start) * 1000,
+            (
+                time.time() -
+                embedding_start
+            ) * 1000,
             2
         )
 
         log_event(
             "embedding_generated",
-            "Dermatology query embedding created",
+            "Query embedding generated",
             {
                 "embedding_dimension":
                     len(query_embedding),
@@ -321,8 +387,8 @@ def retrieve_similar_cases(
     except Exception as e:
 
         log_event(
-            "embedding_error",
-            "Embedding generation error",
+            "embedding_failure",
+            "Embedding generation failed",
             {
                 "error": str(e)
             }
@@ -331,7 +397,7 @@ def retrieve_similar_cases(
         return []
 
     # =====================================================
-    # SIMILARITY SEARCH
+    # RETRIEVAL LOOP
     # =====================================================
 
     results = []
@@ -342,66 +408,83 @@ def retrieve_similar_cases(
 
         if not isinstance(case_data, dict):
 
-            log_event(
-                "invalid_case_skipped",
-                "Skipping invalid dermatology case"
-            )
-
             continue
 
         try:
 
-            # -------------------------------------------------
+            # ------------------------------------------------
             # CASE EMBEDDING
-            # -------------------------------------------------
+            # ------------------------------------------------
 
             case_embedding = np.array(
-                case_data.get("embedding", [])
+                case_data.get(
+                    "embedding",
+                    []
+                )
             )
 
             if case_embedding.size == 0:
+
                 continue
 
-            # -------------------------------------------------
+            # ------------------------------------------------
             # DIMENSION CHECK
-            # -------------------------------------------------
+            # ------------------------------------------------
 
             if len(query_embedding) != len(case_embedding):
 
-                log_event(
-                    "dimension_mismatch",
-                    "Embedding dimension mismatch",
-                    {
-                        "query_dim":
-                            len(query_embedding),
-
-                        "case_dim":
-                            len(case_embedding)
-                    }
-                )
-
                 continue
 
-            # -------------------------------------------------
+            # ------------------------------------------------
             # COSINE SIMILARITY
-            # -------------------------------------------------
+            # ------------------------------------------------
 
             similarity_score = cosine_similarity(
                 query_embedding,
                 case_embedding
             )
 
-            # -------------------------------------------------
-            # BUILD SEARCHABLE TEXT
-            # -------------------------------------------------
+            # ------------------------------------------------
+            # SEARCHABLE TEXT
+            # ------------------------------------------------
 
-            searchable_text = build_case_search_text(
-                case_data
+            searchable_text = (
+                build_case_search_text(
+                    case_data
+                )
             )
 
-            # -------------------------------------------------
+            # ------------------------------------------------
+            # MATCHED KEYWORDS
+            # ------------------------------------------------
+
+            matched_keywords = (
+                extract_matched_keywords(
+                    enhanced_query,
+                    searchable_text
+                )
+            )
+
+            # ------------------------------------------------
+            # BOOSTED SCORE
+            # ------------------------------------------------
+
+            boosted_score = apply_keyword_boost(
+                similarity_score,
+                matched_keywords
+            )
+
+            # ------------------------------------------------
+            # FILTER LOW SCORES
+            # ------------------------------------------------
+
+            if boosted_score < 0.20:
+
+                continue
+
+            # ------------------------------------------------
             # RESULT OBJECT
-            # -------------------------------------------------
+            # ------------------------------------------------
 
             results.append({
 
@@ -412,31 +495,43 @@ def retrieve_similar_cases(
                     ),
 
                 "similarity":
-                    round(similarity_score, 4),
-
-                "category":
-                    case_data.get(
-                        "category",
-                        "Dermatology"
+                    round(
+                        boosted_score,
+                        4
                     ),
 
-                "location":
+                "chief_complaint":
                     case_data.get(
-                        "location",
+                        "chief_complaint",
                         "Unknown"
                     ),
 
-                "resolution_notes":
+                "affected_body_part":
                     case_data.get(
-                        "resolution_notes",
-                        "No dermatologist notes available"
+                        "affected_body_part",
+                        "Unknown"
                     ),
 
-                "case_description":
+                "symptoms_duration":
                     case_data.get(
-                        "case_description",
+                        "symptoms_duration",
+                        "Unknown"
+                    ),
+
+                "doctor_notes":
+                    case_data.get(
+                        "doctor_notes",
+                        "No notes available"
+                    ),
+
+                "clinical_history":
+                    case_data.get(
+                        "clinical_history",
                         ""
                     ),
+
+                "matched_keywords":
+                    matched_keywords,
 
                 "searchable_text":
                     searchable_text
@@ -448,7 +543,7 @@ def retrieve_similar_cases(
 
             log_event(
                 "case_processing_error",
-                "Error processing dermatology case",
+                "Error processing case",
                 {
                     "error": str(e)
                 }
@@ -464,7 +559,7 @@ def retrieve_similar_cases(
 
         log_event(
             "no_results",
-            "No dermatology similarity results generated"
+            "No similar clinical cases found"
         )
 
         return []
@@ -476,33 +571,15 @@ def retrieve_similar_cases(
     try:
 
         results = sorted(
+
             results,
+
             key=lambda x: x["similarity"],
+
             reverse=True
         )
 
         top_results = results[:top_k]
-
-        log_event(
-            "top_k_selected",
-            "Top dermatology matches selected",
-            {
-                "top_k":
-                    top_k,
-
-                "top_case_ids":
-                    [
-                        r["case_id"]
-                        for r in top_results
-                    ],
-
-                "top_scores":
-                    [
-                        r["similarity"]
-                        for r in top_results
-                    ]
-            }
-        )
 
     except Exception as e:
 
@@ -517,7 +594,7 @@ def retrieve_similar_cases(
         return []
 
     # =====================================================
-    # TOTAL TIME
+    # FINAL LOGGING
     # =====================================================
 
     total_time = round(
@@ -527,13 +604,25 @@ def retrieve_similar_cases(
 
     log_event(
         "retrieval_completed",
-        "Dermatology retrieval completed successfully",
+        "Clinical retrieval completed",
         {
             "processed_cases":
                 processed_cases,
 
             "returned_cases":
                 len(top_results),
+
+            "top_case_ids":
+                [
+                    r["case_id"]
+                    for r in top_results
+                ],
+
+            "top_scores":
+                [
+                    r["similarity"]
+                    for r in top_results
+                ],
 
             "total_time_ms":
                 total_time

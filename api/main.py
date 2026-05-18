@@ -50,16 +50,18 @@ def log_event(event_type, request_id, message, extra=None):
 # =========================================================
 
 app = FastAPI(
-    title="Dermatology Clinical Match API",
-    version="2.0.0",
+    title="Clinical Match API",
+    version="3.0.0",
     description="""
-    AI-powered Dermatology Clinical Similarity Matching API
+    AI-powered Clinical Similarity Matching API
 
     Features:
-    - Dynamic Dermatology Input Processing
-    - Clinical Search Query Generation
-    - Dermatology Context Generation
-    - Similar Dermatology Case Retrieval
+    - Dynamic Clinical Input Processing
+    - Optional Field Handling
+    - Search Query Generation
+    - Clinical Context Generation
+    - Similar Patient Case Retrieval
+    - Top 2 Clinical Match Recommendation
     """
 )
 
@@ -85,8 +87,8 @@ app.add_middleware(
 def root():
 
     return {
-        "message": "Welcome to Dermatology Clinical Match API",
-        "version": "2.0.0",
+        "message": "Welcome to Clinical Match API",
+        "version": "3.0.0",
         "docs": "/docs",
         "status": "running"
     }
@@ -100,7 +102,7 @@ def root():
 def health_check():
 
     return {
-        "status": "Dermatology Clinical Match API is running"
+        "status": "Clinical Match API is running"
     }
 
 
@@ -129,7 +131,7 @@ def clinical_match(request: ClinicalMatchRequest):
     log_event(
         "request_received",
         request_id,
-        "Incoming dermatology clinical request"
+        "Incoming clinical request"
     )
 
     try:
@@ -143,7 +145,7 @@ def clinical_match(request: ClinicalMatchRequest):
         non_empty_fields = [
             value
             for value in request_data.values()
-            if value not in [None, "", []]
+            if value not in [None, "", [], {}]
         ]
 
         if len(non_empty_fields) == 0:
@@ -151,14 +153,14 @@ def clinical_match(request: ClinicalMatchRequest):
             log_event(
                 "validation_error",
                 request_id,
-                "Empty dermatology request received"
+                "Empty clinical request received"
             )
 
             raise HTTPException(
                 status_code=400,
                 detail={
                     "error": "Invalid Input",
-                    "message": "At least one dermatology clinical field is required"
+                    "message": "At least one clinical field is required"
                 }
             )
 
@@ -188,6 +190,11 @@ def clinical_match(request: ClinicalMatchRequest):
             {}
         )
 
+        available_fields = processed_inputs.get(
+            "available_fields",
+            []
+        )
+
         # -------------------------------------------------
         # LOG SEARCH QUERY
         # -------------------------------------------------
@@ -195,9 +202,10 @@ def clinical_match(request: ClinicalMatchRequest):
         log_event(
             "search_query_generated",
             request_id,
-            "Dermatology search query generated",
+            "Clinical search query generated",
             {
-                "search_query": search_query
+                "search_query": search_query,
+                "available_fields": available_fields
             }
         )
 
@@ -208,7 +216,7 @@ def clinical_match(request: ClinicalMatchRequest):
         log_event(
             "context_generated",
             request_id,
-            "Dermatology clinical context generated",
+            "Clinical context generated",
             {
                 "generated_context": generated_context
             }
@@ -231,23 +239,33 @@ def clinical_match(request: ClinicalMatchRequest):
         # NO RESULTS FOUND
         # =================================================
 
-        if not result:
+        if not result or len(result.get("matches", [])) == 0:
 
             log_event(
                 "no_result",
                 request_id,
-                "No similar dermatology cases found"
+                "No similar patient cases found"
             )
 
             raise HTTPException(
                 status_code=404,
                 detail={
                     "error": "No Results",
-                    "message": "No similar dermatology cases found",
+                    "message": "No similar patient cases found",
                     "matches": [],
+                    "total_matches_found": 0,
                     "confidence_score": 0.0
                 }
             )
+
+        # =================================================
+        # LIMIT TO TOP 2 MATCHES
+        # =================================================
+
+        top_matches = result.get("matches", [])[:2]
+
+        result["matches"] = top_matches
+        result["total_matches_found"] = len(top_matches)
 
         # =================================================
         # RESPONSE TIME
@@ -265,9 +283,10 @@ def clinical_match(request: ClinicalMatchRequest):
         log_event(
             "response_ready",
             request_id,
-            "Dermatology response prepared successfully",
+            "Clinical response prepared successfully",
             {
-                "response_time_ms": response_time
+                "response_time_ms": response_time,
+                "matches_returned": len(top_matches)
             }
         )
 
@@ -280,7 +299,8 @@ def clinical_match(request: ClinicalMatchRequest):
             "request_id": request_id,
             "search_query": search_query,
             "generated_context": generated_context,
-            "processing_time_ms": response_time
+            "processing_time_ms": response_time,
+            "input_fields_used": available_fields
         }
 
         return ClinicalMatchResponse(**final_response)
@@ -312,7 +332,7 @@ def clinical_match(request: ClinicalMatchRequest):
         log_event(
             "pipeline_error",
             request_id,
-            "Dermatology pipeline execution failure",
+            "Clinical pipeline execution failure",
             {
                 "error": str(e)
             }
@@ -322,7 +342,7 @@ def clinical_match(request: ClinicalMatchRequest):
             status_code=500,
             detail={
                 "error": "Internal Server Error",
-                "message": "Error occurred while processing dermatology clinical request",
+                "message": "Error occurred while processing clinical request",
                 "matches": [],
                 "confidence_score": 0.0,
                 "explanation": str(e)
@@ -338,23 +358,28 @@ def clinical_match(request: ClinicalMatchRequest):
 def sample_query():
 
     return {
+
         "sample_search_query":
-            "Acne vulgaris | Facial pimples | Oily skin | Inflammatory lesions",
+            "Knee pain | Swelling | ACL injury | Difficulty walking",
 
         "sample_context":
             """
-            Age: 22
-            Gender: Female
-            Chief Complaint: Painful acne lesions on cheeks and forehead
-            Symptoms Duration: 4 months
-            Previous Skin History: Recurrent acne outbreaks
-            Current Medications: Salicylic acid face wash
+            Chief Complaint: Knee pain and instability
+            Affected Body Part: Right Knee
+            Symptoms Duration: 3 months
+            Previous Injuries: ACL tear history
+            Current Medications: Ibuprofen
             Allergies: None
-            Subjective Assessment: Increased breakouts during stress
-            Physical Examination: Multiple papules and pustules over cheeks
-            Objective Findings: Mild post-inflammatory hyperpigmentation
-            Pain Classification: Mild to moderate
-            Doctor Notes: Possible inflammatory acne vulgaris
+            Occupation: Athlete
+            Activity Levels: High
+            Gender: Male
+            Age: 24
+            Doctor Name: Dr. Smith
+            Subjective Assessment: Pain increases during running
+            Functional Assessment: Difficulty climbing stairs
+            Physical Examination: Swelling and tenderness over ACL region
+            Objective Findings: Reduced range of motion
+            Patient Pain Classification: Moderate
             """
     }
 

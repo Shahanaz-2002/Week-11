@@ -1,11 +1,13 @@
 from pydantic import BaseModel, Field, validator
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import re
 
 
 class ClinicalMatchRequest(BaseModel):
 
-    # ---------------- BASIC PATIENT DETAILS ----------------
+    # =====================================================
+    # BASIC PATIENT DETAILS
+    # =====================================================
 
     chief_complaint: Optional[str] = Field(
         default="",
@@ -74,7 +76,9 @@ class ClinicalMatchRequest(BaseModel):
         description="Doctor or clinician name"
     )
 
-    # ---------------- CLINICAL ASSESSMENT ----------------
+    # =====================================================
+    # CLINICAL ASSESSMENT
+    # =====================================================
 
     subjective_assessment: Optional[str] = Field(
         default="",
@@ -106,7 +110,9 @@ class ClinicalMatchRequest(BaseModel):
         description="Pain severity or classification"
     )
 
-    # ---------------- NEW DAY 2 FIELDS ----------------
+    # =====================================================
+    # ADDITIONAL CLINICAL FIELDS
+    # =====================================================
 
     symptoms: Optional[str] = Field(
         default="",
@@ -126,6 +132,10 @@ class ClinicalMatchRequest(BaseModel):
         description="Complete clinical history"
     )
 
+    # =====================================================
+    # SYSTEM GENERATED FIELDS
+    # =====================================================
+
     search_query: Optional[str] = Field(
         default="",
         description="Generated retrieval search query"
@@ -136,7 +146,9 @@ class ClinicalMatchRequest(BaseModel):
         description="Generated clinical context for retrieval"
     )
 
-    # ---------------- TEXT CLEANING VALIDATOR ----------------
+    # =====================================================
+    # TEXT CLEANING VALIDATOR
+    # =====================================================
 
     @validator(
         "chief_complaint",
@@ -168,15 +180,20 @@ class ClinicalMatchRequest(BaseModel):
         # Convert to string
         v = str(v)
 
-        # Remove extra spaces
+        # Remove leading/trailing spaces
         v = v.strip()
 
         # Remove multiple spaces
         v = re.sub(r"\s+", " ", v)
 
+        # Remove unwanted special characters
+        v = re.sub(r"[^\w\s,.\-:/()]", "", v)
+
         return v
 
-    # ---------------- AGE VALIDATION ----------------
+    # =====================================================
+    # AGE VALIDATION
+    # =====================================================
 
     @validator("age")
     def validate_age(cls, v):
@@ -185,11 +202,15 @@ class ClinicalMatchRequest(BaseModel):
             return v
 
         if v < 0 or v > 120:
-            raise ValueError("Age must be between 0 and 120")
+            raise ValueError(
+                "Age must be between 0 and 120"
+            )
 
         return v
 
-    # ---------------- GENDER VALIDATION ----------------
+    # =====================================================
+    # GENDER VALIDATION
+    # =====================================================
 
     @validator("gender")
     def validate_gender(cls, v):
@@ -211,145 +232,159 @@ class ClinicalMatchRequest(BaseModel):
 
         return v.title()
 
-    # ---------------- AT LEAST ONE FIELD VALIDATION ----------------
+    # =====================================================
+    # AT LEAST ONE FIELD VALIDATION
+    # =====================================================
 
     @validator("*", pre=False)
-    def validate_at_least_one_field(cls, v, values, **kwargs):
+    def validate_at_least_one_field(
+        cls,
+        v,
+        values,
+        **kwargs
+    ):
 
         if kwargs["field"].name == "generated_context":
 
             valid_fields = [
                 field
                 for field in values.values()
-                if field not in [None, "", []]
+                if field not in [None, "", [], {}]
             ]
 
             if len(valid_fields) == 0:
+
                 raise ValueError(
                     "At least one clinical input field is required"
                 )
 
         return v
 
-    # ---------------- SEARCH QUERY GENERATION ----------------
+    # =====================================================
+    # AVAILABLE INPUT FIELDS
+    # =====================================================
+
+    def get_available_fields(self) -> List[str]:
+
+        available_fields = []
+
+        for field_name, value in self.dict().items():
+
+            if value not in [None, "", [], {}]:
+
+                available_fields.append(field_name)
+
+        return available_fields
+
+    # =====================================================
+    # SEARCH QUERY GENERATION
+    # =====================================================
 
     def build_search_query(self) -> str:
 
         components = []
 
-        if self.chief_complaint:
-            components.append(self.chief_complaint)
+        weighted_fields = [
+            self.chief_complaint,
+            self.affected_body_part,
+            self.symptoms,
+            self.subjective_assessment,
+            self.physical_examination,
+            self.objective_findings,
+            self.patient_pain_classification,
+            self.previous_injuries,
+            self.functional_assessment
+        ]
 
-        if self.affected_body_part:
-            components.append(self.affected_body_part)
+        for item in weighted_fields:
 
-        if self.symptoms_duration:
-            components.append(self.symptoms_duration)
-
-        if self.patient_pain_classification:
-            components.append(self.patient_pain_classification)
-
-        if self.objective_findings:
-            components.append(self.objective_findings)
-
-        if self.physical_examination:
-            components.append(self.physical_examination)
-
-        if self.symptoms:
-            components.append(self.symptoms)
+            if item:
+                components.append(item)
 
         search_query = " | ".join(components)
 
         return search_query.strip()
 
-    # ---------------- CONTEXT GENERATION ----------------
+    # =====================================================
+    # CONTEXT GENERATION
+    # =====================================================
 
     def build_context(self) -> str:
 
         context_parts = []
 
-        if self.age:
-            context_parts.append(f"Age: {self.age}")
+        field_mappings = {
+            "Age": self.age,
+            "Gender": self.gender,
+            "Occupation": self.occupation,
+            "Activity Levels": self.activity_levels,
+            "Chief Complaint": self.chief_complaint,
+            "Affected Body Part": self.affected_body_part,
+            "Symptoms Duration": self.symptoms_duration,
+            "Previous Injuries": self.previous_injuries,
+            "Current Medications": self.current_medications,
+            "Allergies": self.allergies,
+            "Subjective Assessment": self.subjective_assessment,
+            "Functional Assessment": self.functional_assessment,
+            "Physical Examination": self.physical_examination,
+            "Objective Findings": self.objective_findings,
+            "Pain Classification": self.patient_pain_classification,
+            "Symptoms": self.symptoms,
+            "Doctor Notes": self.doctor_notes,
+            "Clinical History": self.clinical_history,
+            "Doctor Name": self.doctor_name
+        }
 
-        if self.gender:
-            context_parts.append(f"Gender: {self.gender}")
+        for field_name, value in field_mappings.items():
 
-        if self.occupation:
-            context_parts.append(f"Occupation: {self.occupation}")
+            if value not in [None, "", [], {}]:
 
-        if self.activity_levels:
-            context_parts.append(
-                f"Activity Level: {self.activity_levels}"
-            )
-
-        if self.chief_complaint:
-            context_parts.append(
-                f"Chief Complaint: {self.chief_complaint}"
-            )
-
-        if self.affected_body_part:
-            context_parts.append(
-                f"Affected Body Part: {self.affected_body_part}"
-            )
-
-        if self.symptoms_duration:
-            context_parts.append(
-                f"Symptoms Duration: {self.symptoms_duration}"
-            )
-
-        if self.previous_injuries:
-            context_parts.append(
-                f"Previous Injuries: {self.previous_injuries}"
-            )
-
-        if self.current_medications:
-            context_parts.append(
-                f"Current Medications: {self.current_medications}"
-            )
-
-        if self.allergies:
-            context_parts.append(
-                f"Allergies: {self.allergies}"
-            )
-
-        if self.subjective_assessment:
-            context_parts.append(
-                f"Subjective Assessment: {self.subjective_assessment}"
-            )
-
-        if self.functional_assessment:
-            context_parts.append(
-                f"Functional Assessment: {self.functional_assessment}"
-            )
-
-        if self.physical_examination:
-            context_parts.append(
-                f"Physical Examination: {self.physical_examination}"
-            )
-
-        if self.objective_findings:
-            context_parts.append(
-                f"Objective Findings: {self.objective_findings}"
-            )
-
-        if self.patient_pain_classification:
-            context_parts.append(
-                f"Pain Classification: {self.patient_pain_classification}"
-            )
-
-        if self.doctor_notes:
-            context_parts.append(
-                f"Doctor Notes: {self.doctor_notes}"
-            )
-
-        if self.clinical_history:
-            context_parts.append(
-                f"Clinical History: {self.clinical_history}"
-            )
+                context_parts.append(
+                    f"{field_name}: {value}"
+                )
 
         return "\n".join(context_parts)
 
-    # ---------------- COMPLETE PROCESSING ----------------
+    # =====================================================
+    # COMBINED SYMPTOMS GENERATION
+    # =====================================================
+
+    def build_combined_symptoms(self) -> str:
+
+        symptom_parts = [
+            self.chief_complaint,
+            self.subjective_assessment,
+            self.objective_findings,
+            self.physical_examination,
+            self.symptoms,
+            self.patient_pain_classification
+        ]
+
+        combined = " ".join([
+            str(part)
+            for part in symptom_parts
+            if part not in [None, "", []]
+        ])
+
+        return combined.strip()
+
+    # =====================================================
+    # PATIENT METADATA GENERATION
+    # =====================================================
+
+    def build_patient_metadata(self) -> Dict[str, Any]:
+
+        return {
+            "age": self.age,
+            "gender": self.gender,
+            "occupation": self.occupation,
+            "activity_levels": self.activity_levels,
+            "doctor_name": self.doctor_name
+        }
+
+    # =====================================================
+    # COMPLETE DYNAMIC PROCESSING
+    # =====================================================
 
     def generate_dynamic_inputs(self) -> Dict[str, Any]:
 
@@ -357,21 +392,16 @@ class ClinicalMatchRequest(BaseModel):
 
         generated_context = self.build_context()
 
-        combined_symptoms = " ".join([
-            self.chief_complaint,
-            self.subjective_assessment,
-            self.objective_findings,
-            self.symptoms
-        ]).strip()
+        combined_symptoms = self.build_combined_symptoms()
+
+        patient_metadata = self.build_patient_metadata()
+
+        available_fields = self.get_available_fields()
 
         return {
             "search_query": search_query,
             "generated_context": generated_context,
             "combined_symptoms": combined_symptoms,
-            "patient_metadata": {
-                "age": self.age,
-                "gender": self.gender,
-                "occupation": self.occupation,
-                "activity_levels": self.activity_levels
-            }
+            "patient_metadata": patient_metadata,
+            "available_fields": available_fields
         }

@@ -2,210 +2,389 @@ import requests
 import json
 import time
 import uuid
+from typing import Dict, Any
 
-# =========================
+
+# =========================================================
 # API CONFIGURATION
-# =========================
+# =========================================================
 
 API_URL = "http://127.0.0.1:8000/clinical/match"
 
+REQUEST_TIMEOUT = 30
 
-# =========================
+
+# =========================================================
 # HELPER FUNCTIONS
-# =========================
+# =========================================================
 
 def print_divider():
-    print("=" * 80)
+
+    print("=" * 100)
 
 
 def generate_request_id():
+
     return f"REQ-{uuid.uuid4().hex[:8].upper()}"
 
 
-# =========================
-# SUCCESS RESPONSE VALIDATION
-# =========================
+# =========================================================
+# RESPONSE VALIDATION:
+# SUCCESS RESPONSE
+# =========================================================
 
 def validate_success_response(data):
 
     required_fields = [
+
         "status",
         "message",
+        "request_id",
         "matches",
+        "total_matches_found",
         "confidence_score",
-        "generated_clinical_context",
+        "generated_context",
         "explanation"
     ]
 
-    # ---------------- FIELD CHECK ----------------
+    # -----------------------------------------------------
+    # REQUIRED FIELD CHECK
+    # -----------------------------------------------------
+
     for field in required_fields:
 
         if field not in data:
-            return False, f"Missing field: {field}"
 
-    # ---------------- TYPE CHECKS ----------------
+            return (
+                False,
+                f"Missing field: {field}"
+            )
+
+    # -----------------------------------------------------
+    # TYPE CHECKS
+    # -----------------------------------------------------
+
     if not isinstance(data["matches"], list):
-        return False, "matches should be a list"
 
-    if not isinstance(data["confidence_score"], (float, int)):
-        return False, "confidence_score should be numeric"
+        return (
+            False,
+            "matches should be a list"
+        )
 
-    if not (0.0 <= data["confidence_score"] <= 1.0):
-        return False, "confidence_score out of range"
+    if not isinstance(
+        data["confidence_score"],
+        (float, int)
+    ):
 
-    # ---------------- MATCH STRUCTURE CHECK ----------------
+        return (
+            False,
+            "confidence_score should be numeric"
+        )
+
+    if not (
+        0.0 <=
+        data["confidence_score"] <=
+        1.0
+    ):
+
+        return (
+            False,
+            "confidence_score out of range"
+        )
+
+    # -----------------------------------------------------
+    # MATCH STRUCTURE CHECK
+    # -----------------------------------------------------
+
     for match in data["matches"]:
 
         required_match_fields = [
+
             "case_id",
             "match_score",
             "recommended_tests",
-            "recommended_medicines"
+            "recommended_medicines",
+            "confidence_level"
         ]
 
         for field in required_match_fields:
 
             if field not in match:
-                return False, f"Missing match field: {field}"
 
-    return True, "Valid response structure"
+                return (
+                    False,
+                    f"Missing match field: {field}"
+                )
+
+    return (
+        True,
+        "Valid success response"
+    )
 
 
-# =========================
-# ERROR RESPONSE VALIDATION
-# =========================
+# =========================================================
+# RESPONSE VALIDATION:
+# ERROR RESPONSE
+# =========================================================
 
 def validate_error_response(data):
 
     if "detail" not in data:
-        return False, "Missing 'detail' field"
 
-    return True, "Valid error response"
+        return (
+            False,
+            "Missing detail field"
+        )
+
+    return (
+        True,
+        "Valid error response"
+    )
 
 
-# =========================
+# =========================================================
+# PRINT TEST RESULT
+# =========================================================
+
+def print_test_result(
+    passed: bool,
+    message: str
+):
+
+    if passed:
+
+        print(f"\nPASS : {message}")
+
+    else:
+
+        print(f"\nFAIL : {message}")
+
+
+# =========================================================
 # REQUEST SENDER
-# =========================
+# =========================================================
 
-def send_request(payload, test_name, expected_status):
+def send_request(
+    payload: Dict[str, Any],
+    test_name: str,
+    expected_status: int
+):
 
     print_divider()
 
-    print(f"TEST NAME : {test_name}")
+    print(f"TEST NAME   : {test_name}")
 
     request_id = generate_request_id()
 
-    print(f"REQUEST ID : {request_id}")
+    print(f"REQUEST ID  : {request_id}")
+
+    print("\nREQUEST PAYLOAD:\n")
+
+    print(
+        json.dumps(
+            payload,
+            indent=4
+        )
+    )
 
     start_time = time.time()
 
     try:
 
+        # =================================================
+        # API REQUEST
+        # =================================================
+
         response = requests.post(
+
             API_URL,
-            json=payload
+
+            json=payload,
+
+            timeout=REQUEST_TIMEOUT
         )
 
         response_time = round(
-            (time.time() - start_time) * 1000,
+            (
+                time.time() -
+                start_time
+            ) * 1000,
             2
         )
 
-        print(f"STATUS CODE : {response.status_code}")
+        print(f"\nSTATUS CODE : {response.status_code}")
 
         print(f"RESPONSE TIME : {response_time} ms")
+
+        # =================================================
+        # JSON PARSING
+        # =================================================
 
         try:
 
             data = response.json()
 
-            print("\nRESPONSE JSON:")
+            print("\nRESPONSE JSON:\n")
 
-            print(json.dumps(data, indent=4))
+            print(
+                json.dumps(
+                    data,
+                    indent=4
+                )
+            )
 
         except Exception:
 
-            print("FAIL : Invalid JSON response")
-
-            return False
-
-        # ---------------- STATUS CHECK ----------------
-        if response.status_code != expected_status:
-
-            print(
-                f"FAIL : Expected {expected_status}, "
-                f"got {response.status_code}"
+            print_test_result(
+                False,
+                "Invalid JSON response"
             )
 
             return False
 
-        # ---------------- SUCCESS VALIDATION ----------------
+        # =================================================
+        # STATUS CODE CHECK
+        # =================================================
+
+        if response.status_code != expected_status:
+
+            print_test_result(
+
+                False,
+
+                (
+                    f"Expected status "
+                    f"{expected_status}, "
+                    f"got {response.status_code}"
+                )
+            )
+
+            return False
+
+        # =================================================
+        # SUCCESS RESPONSE VALIDATION
+        # =================================================
+
         if response.status_code == 200:
 
-            is_valid, message = validate_success_response(data)
+            is_valid, validation_message = (
+                validate_success_response(
+                    data
+                )
+            )
 
-            if not is_valid:
-
-                print(f"FAIL : {message}")
-
-                return False
-
-        # ---------------- ERROR VALIDATION ----------------
         else:
 
-            is_valid, message = validate_error_response(data)
+            # =============================================
+            # ERROR RESPONSE VALIDATION
+            # =============================================
 
-            if not is_valid:
+            is_valid, validation_message = (
+                validate_error_response(
+                    data
+                )
+            )
 
-                print(f"FAIL : {message}")
+        if not is_valid:
 
-                return False
+            print_test_result(
+                False,
+                validation_message
+            )
 
-        print("PASS")
+            return False
+
+        # =================================================
+        # PASS
+        # =================================================
+
+        print_test_result(
+            True,
+            validation_message
+        )
 
         return True
 
+    # =====================================================
+    # REQUEST FAILURE
+    # =====================================================
+
+    except requests.exceptions.ConnectionError:
+
+        print_test_result(
+            False,
+            "Unable to connect to API server"
+        )
+
+        return False
+
+    except requests.exceptions.Timeout:
+
+        print_test_result(
+            False,
+            "Request timeout"
+        )
+
+        return False
+
     except Exception as e:
 
-        print(f"ERROR : Request failed -> {e}")
+        print_test_result(
+            False,
+            f"Unexpected error -> {e}"
+        )
 
         return False
 
 
-# =========================
+# =========================================================
 # TEST CASES
-# =========================
+# =========================================================
 
 test_cases = [
 
-    # ==================================================
+    # =====================================================
     # FULL VALID INPUT
-    # ==================================================
+    # =====================================================
+
     {
-        "name": "Full Clinical Input",
+        "name":
+            "Full Clinical Input",
 
         "payload": {
-            "chief_complaint": "Right knee pain while climbing stairs",
 
-            "affected_body_part": "Right Knee",
+            "chief_complaint":
+                "Right knee pain while climbing stairs",
 
-            "symptoms_duration": "3 weeks",
+            "affected_body_part":
+                "Right Knee",
 
-            "previous_injuries": "ACL tear 2 years ago",
+            "symptoms_duration":
+                "3 weeks",
 
-            "current_medications": "Ibuprofen",
+            "previous_injuries":
+                "ACL tear 2 years ago",
 
-            "allergies": "Penicillin",
+            "current_medications":
+                "Ibuprofen",
 
-            "occupation": "Construction Worker",
+            "allergies":
+                "Penicillin",
 
-            "activity_levels": "High",
+            "occupation":
+                "Construction Worker",
 
-            "gender": "Male",
+            "activity_levels":
+                "High",
 
-            "age": 35,
+            "gender":
+                "Male",
 
-            "doctor_name": "Dr Kumar",
+            "age":
+                35,
+
+            "doctor_name":
+                "Dr Kumar",
 
             "subjective_assessment":
                 "Pain increases during movement",
@@ -220,118 +399,206 @@ test_cases = [
                 "Reduced range of motion",
 
             "patient_pain_classification":
-                "Moderate"
+                "Moderate",
+
+            "doctor_notes":
+                "Possible ligament instability"
         },
 
-        "expected_status": 200
+        "expected_status":
+            200
     },
 
-    # ==================================================
+    # =====================================================
     # PARTIAL INPUT
-    # ==================================================
+    # =====================================================
+
     {
-        "name": "Partial Clinical Input",
+        "name":
+            "Partial Clinical Input",
 
         "payload": {
-            "chief_complaint": "Lower back pain",
 
-            "occupation": "Driver",
+            "chief_complaint":
+                "Lower back pain",
 
-            "age": 45
+            "occupation":
+                "Driver",
+
+            "age":
+                45
         },
 
-        "expected_status": 200
+        "expected_status":
+            200
     },
 
-    # ==================================================
-    # ONLY ONE FIELD
-    # ==================================================
+    # =====================================================
+    # SINGLE FIELD
+    # =====================================================
+
     {
-        "name": "Single Input Field",
+        "name":
+            "Single Input Field",
 
         "payload": {
-            "chief_complaint": "Shoulder stiffness"
+
+            "chief_complaint":
+                "Shoulder stiffness"
         },
 
-        "expected_status": 200
+        "expected_status":
+            200
     },
 
-    # ==================================================
+    # =====================================================
     # ONLY AGE
-    # ==================================================
+    # =====================================================
+
     {
-        "name": "Only Age Provided",
+        "name":
+            "Only Age Provided",
 
         "payload": {
-            "age": 60
+
+            "age":
+                60
         },
 
-        "expected_status": 200
+        "expected_status":
+            200
     },
 
-    # ==================================================
+    # =====================================================
     # EMPTY REQUEST
-    # ==================================================
+    # =====================================================
+
     {
-        "name": "Empty Request",
+        "name":
+            "Empty Request",
 
         "payload": {},
 
-        "expected_status": 422
+        "expected_status":
+            422
     },
 
-    # ==================================================
+    # =====================================================
     # INVALID AGE
-    # ==================================================
+    # =====================================================
+
     {
-        "name": "Invalid Age Input",
+        "name":
+            "Invalid Age Input",
 
         "payload": {
-            "chief_complaint": "Neck pain",
 
-            "age": 150
+            "chief_complaint":
+                "Neck pain",
+
+            "age":
+                150
         },
 
-        "expected_status": 422
+        "expected_status":
+            422
     },
 
-    # ==================================================
+    # =====================================================
+    # INVALID GENDER
+    # =====================================================
+
+    {
+        "name":
+            "Invalid Gender Input",
+
+        "payload": {
+
+            "chief_complaint":
+                "Knee pain",
+
+            "gender":
+                "Alien"
+        },
+
+        "expected_status":
+            422
+    },
+
+    # =====================================================
     # LONG INPUT
-    # ==================================================
+    # =====================================================
+
     {
-        "name": "Long Clinical Description",
+        "name":
+            "Long Clinical Description",
 
         "payload": {
+
             "subjective_assessment":
-                "Patient reports chronic lower back pain "
-                * 30
+                (
+                    "Patient reports chronic "
+                    "lower back pain "
+                ) * 30
         },
 
-        "expected_status": 200
+        "expected_status":
+            200
     },
 
-    # ==================================================
-    # NULL FIELDS
-    # ==================================================
+    # =====================================================
+    # NULL OPTIONAL FIELDS
+    # =====================================================
+
     {
-        "name": "Null Optional Fields",
+        "name":
+            "Null Optional Fields",
 
         "payload": {
-            "chief_complaint": None,
 
-            "occupation": None,
+            "chief_complaint":
+                None,
 
-            "age": 32
+            "occupation":
+                None,
+
+            "age":
+                32
         },
 
-        "expected_status": 200
+        "expected_status":
+            200
+    },
+
+    # =====================================================
+    # MULTIPLE OPTIONAL INPUTS
+    # =====================================================
+
+    {
+        "name":
+            "Dynamic Optional Inputs",
+
+        "payload": {
+
+            "symptoms":
+                "Swelling and tenderness",
+
+            "doctor_notes":
+                "Suspected inflammation",
+
+            "clinical_history":
+                "Previous sports injury"
+        },
+
+        "expected_status":
+            200
     }
 ]
 
 
-# =========================
+# =========================================================
 # MAIN EXECUTION
-# =========================
+# =========================================================
 
 if __name__ == "__main__":
 
@@ -343,11 +610,20 @@ if __name__ == "__main__":
 
     results_summary = []
 
+    total_start_time = time.time()
+
+    # =====================================================
+    # EXECUTE TEST CASES
+    # =====================================================
+
     for test in test_cases:
 
         result = send_request(
+
             payload=test["payload"],
+
             test_name=test["name"],
+
             expected_status=test["expected_status"]
         )
 
@@ -356,8 +632,12 @@ if __name__ == "__main__":
             passed += 1
 
             results_summary.append({
-                "test": test["name"],
-                "status": "PASS"
+
+                "test":
+                    test["name"],
+
+                "status":
+                    "PASS"
             })
 
         else:
@@ -365,32 +645,82 @@ if __name__ == "__main__":
             failed += 1
 
             results_summary.append({
-                "test": test["name"],
-                "status": "FAIL"
+
+                "test":
+                    test["name"],
+
+                "status":
+                    "FAIL"
             })
+
+    # =====================================================
+    # FINAL SUMMARY
+    # =====================================================
+
+    total_execution_time = round(
+        (
+            time.time() -
+            total_start_time
+        ) * 1000,
+        2
+    )
 
     print_divider()
 
-    print("FINAL SUMMARY")
+    print("FINAL SUMMARY\n")
 
-    print(f"TOTAL TESTS : {len(test_cases)}")
+    print(f"TOTAL TESTS        : {len(test_cases)}")
 
-    print(f"PASSED      : {passed}")
+    print(f"PASSED             : {passed}")
 
-    print(f"FAILED      : {failed}")
+    print(f"FAILED             : {failed}")
 
-    # =========================
-    # SAVE TEST RESULTS
-    # =========================
+    print(
+        f"TOTAL EXECUTION MS : "
+        f"{total_execution_time}"
+    )
 
-    with open("test_results.json", "w") as f:
+    # =====================================================
+    # SAVE RESULTS
+    # =====================================================
+
+    final_results = {
+
+        "total_tests":
+            len(test_cases),
+
+        "passed":
+            passed,
+
+        "failed":
+            failed,
+
+        "execution_time_ms":
+            total_execution_time,
+
+        "results":
+            results_summary
+    }
+
+    with open(
+        "test_results.json",
+        "w"
+    ) as f:
 
         json.dump(
-            results_summary,
+            final_results,
             f,
             indent=4
         )
 
-    print("\nResults saved to test_results.json")
+    print(
+        "\nResults saved to "
+        "test_results.json"
+    )
 
-    print("Clinical Match API Simulation Completed!")
+    print(
+        "\nClinical Match API "
+        "Simulation Completed!"
+    )
+
+    print_divider()

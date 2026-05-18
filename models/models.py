@@ -1,9 +1,29 @@
-from pydantic import BaseModel, Field, field_validator, model_validator
-from typing import List, Optional
+from pydantic import (
+    BaseModel,
+    Field,
+    field_validator,
+    model_validator
+)
+
+from typing import (
+    List,
+    Optional,
+    Dict,
+    Any
+)
+
+import re
 
 
-# ---------------- REQUEST MODEL ----------------
+# =========================================================
+# REQUEST MODEL
+# =========================================================
+
 class ClinicalMatchRequest(BaseModel):
+
+    # -----------------------------------------------------
+    # BASIC PATIENT DETAILS
+    # -----------------------------------------------------
 
     chief_complaint: Optional[str] = Field(
         default="",
@@ -62,6 +82,10 @@ class ClinicalMatchRequest(BaseModel):
         description="Doctor or clinician name"
     )
 
+    # -----------------------------------------------------
+    # CLINICAL ASSESSMENTS
+    # -----------------------------------------------------
+
     subjective_assessment: Optional[str] = Field(
         default="",
         description="Subjective assessment provided by clinician"
@@ -87,7 +111,28 @@ class ClinicalMatchRequest(BaseModel):
         description="Pain severity or classification"
     )
 
-    # ---------------- FIELD VALIDATORS ----------------
+    # -----------------------------------------------------
+    # ADDITIONAL OPTIONAL INPUTS
+    # -----------------------------------------------------
+
+    symptoms: Optional[str] = Field(
+        default="",
+        description="Additional symptoms"
+    )
+
+    doctor_notes: Optional[str] = Field(
+        default="",
+        description="Doctor notes or comments"
+    )
+
+    clinical_history: Optional[str] = Field(
+        default="",
+        description="Clinical history of patient"
+    )
+
+    # -----------------------------------------------------
+    # FIELD VALIDATORS
+    # -----------------------------------------------------
 
     @field_validator(
         "chief_complaint",
@@ -105,6 +150,9 @@ class ClinicalMatchRequest(BaseModel):
         "physical_examination",
         "objective_findings",
         "patient_pain_classification",
+        "symptoms",
+        "doctor_notes",
+        "clinical_history",
         mode="before"
     )
     @classmethod
@@ -113,7 +161,20 @@ class ClinicalMatchRequest(BaseModel):
         if v is None:
             return ""
 
-        return str(v).strip()
+        # Convert to string
+        value = str(v)
+
+        # Remove leading/trailing spaces
+        value = value.strip()
+
+        # Remove multiple spaces
+        value = re.sub(r"\s+", " ", value)
+
+        return value
+
+    # -----------------------------------------------------
+    # AGE VALIDATION
+    # -----------------------------------------------------
 
     @field_validator("age")
     @classmethod
@@ -123,11 +184,42 @@ class ClinicalMatchRequest(BaseModel):
             return v
 
         if v < 0 or v > 120:
-            raise ValueError("age must be between 0 and 120")
+
+            raise ValueError(
+                "Age must be between 0 and 120"
+            )
 
         return v
 
-    # ---------------- MODEL VALIDATOR ----------------
+    # -----------------------------------------------------
+    # GENDER VALIDATION
+    # -----------------------------------------------------
+
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(cls, v):
+
+        if not v:
+            return ""
+
+        allowed = [
+            "male",
+            "female",
+            "other",
+            "prefer not to say"
+        ]
+
+        if v.lower() not in allowed:
+
+            raise ValueError(
+                "Gender must be Male, Female, Other, or Prefer not to say"
+            )
+
+        return v.title()
+
+    # -----------------------------------------------------
+    # AT LEAST ONE FIELD VALIDATION
+    # -----------------------------------------------------
 
     @model_validator(mode="after")
     def validate_at_least_one_field(self):
@@ -135,19 +227,168 @@ class ClinicalMatchRequest(BaseModel):
         values = self.model_dump()
 
         non_empty_fields = [
-            value for value in values.values()
-            if value not in [None, ""]
+            value
+            for value in values.values()
+            if value not in [None, "", [], {}]
         ]
 
         if len(non_empty_fields) == 0:
+
             raise ValueError(
                 "At least one clinical input field is required"
             )
 
         return self
 
+    # -----------------------------------------------------
+    # AVAILABLE INPUT FIELDS
+    # -----------------------------------------------------
 
-# ---------------- MATCH RESULT MODEL ----------------
+    def get_available_fields(self) -> List[str]:
+
+        available_fields = []
+
+        for field_name, value in self.model_dump().items():
+
+            if value not in [None, "", [], {}]:
+
+                available_fields.append(field_name)
+
+        return available_fields
+
+    # -----------------------------------------------------
+    # SEARCH QUERY GENERATION
+    # -----------------------------------------------------
+
+    def build_search_query(self) -> str:
+
+        components = []
+
+        weighted_inputs = [
+            self.chief_complaint,
+            self.affected_body_part,
+            self.symptoms_duration,
+            self.symptoms,
+            self.subjective_assessment,
+            self.physical_examination,
+            self.objective_findings,
+            self.patient_pain_classification,
+            self.previous_injuries
+        ]
+
+        for item in weighted_inputs:
+
+            if item not in [None, ""]:
+
+                components.append(item)
+
+        return " | ".join(components).strip()
+
+    # -----------------------------------------------------
+    # CONTEXT GENERATION
+    # -----------------------------------------------------
+
+    def build_context(self) -> str:
+
+        context_parts = []
+
+        field_map = {
+            "Age": self.age,
+            "Gender": self.gender,
+            "Occupation": self.occupation,
+            "Activity Levels": self.activity_levels,
+            "Chief Complaint": self.chief_complaint,
+            "Affected Body Part": self.affected_body_part,
+            "Symptoms Duration": self.symptoms_duration,
+            "Previous Injuries": self.previous_injuries,
+            "Current Medications": self.current_medications,
+            "Allergies": self.allergies,
+            "Subjective Assessment": self.subjective_assessment,
+            "Functional Assessment": self.functional_assessment,
+            "Physical Examination": self.physical_examination,
+            "Objective Findings": self.objective_findings,
+            "Pain Classification": self.patient_pain_classification,
+            "Symptoms": self.symptoms,
+            "Doctor Notes": self.doctor_notes,
+            "Clinical History": self.clinical_history,
+            "Doctor Name": self.doctor_name
+        }
+
+        for field_name, value in field_map.items():
+
+            if value not in [None, "", [], {}]:
+
+                context_parts.append(
+                    f"{field_name}: {value}"
+                )
+
+        return "\n".join(context_parts)
+
+    # -----------------------------------------------------
+    # COMBINED SYMPTOMS
+    # -----------------------------------------------------
+
+    def build_combined_symptoms(self) -> str:
+
+        symptoms = [
+            self.chief_complaint,
+            self.subjective_assessment,
+            self.objective_findings,
+            self.physical_examination,
+            self.symptoms
+        ]
+
+        combined = " ".join([
+            item
+            for item in symptoms
+            if item not in [None, ""]
+        ])
+
+        return combined.strip()
+
+    # -----------------------------------------------------
+    # PATIENT METADATA
+    # -----------------------------------------------------
+
+    def build_patient_metadata(self) -> Dict[str, Any]:
+
+        return {
+            "age": self.age,
+            "gender": self.gender,
+            "occupation": self.occupation,
+            "activity_levels": self.activity_levels,
+            "doctor_name": self.doctor_name
+        }
+
+    # -----------------------------------------------------
+    # COMPLETE DYNAMIC INPUT GENERATION
+    # -----------------------------------------------------
+
+    def generate_dynamic_inputs(self) -> Dict[str, Any]:
+
+        return {
+
+            "search_query":
+                self.build_search_query(),
+
+            "generated_context":
+                self.build_context(),
+
+            "combined_symptoms":
+                self.build_combined_symptoms(),
+
+            "patient_metadata":
+                self.build_patient_metadata(),
+
+            "available_fields":
+                self.get_available_fields()
+        }
+
+
+# =========================================================
+# MATCH RESULT MODEL
+# =========================================================
+
 class MatchResult(BaseModel):
 
     case_id: str = Field(
@@ -173,6 +414,21 @@ class MatchResult(BaseModel):
         description="Affected body part of matched patient"
     )
 
+    symptoms_duration: str = Field(
+        default="Unknown",
+        description="Symptoms duration"
+    )
+
+    doctor_notes: str = Field(
+        default="No notes available",
+        description="Doctor or clinician notes"
+    )
+
+    explanation: str = Field(
+        default="Match generated using clinical similarity search",
+        description="Explanation for similarity match"
+    )
+
     recommended_tests: List[str] = Field(
         default_factory=list,
         description="Recommended diagnostic tests"
@@ -183,13 +439,21 @@ class MatchResult(BaseModel):
         description="Recommended medicines"
     )
 
-    doctor_notes: str = Field(
-        default="No notes available",
-        description="Doctor or clinician notes"
+    matched_keywords: List[str] = Field(
+        default_factory=list,
+        description="Keywords contributing to the match"
+    )
+
+    confidence_level: str = Field(
+        default="Moderate",
+        description="Confidence level of prediction"
     )
 
 
-# ---------------- FINAL RESPONSE MODEL ----------------
+# =========================================================
+# FINAL RESPONSE MODEL
+# =========================================================
+
 class ClinicalMatchResponse(BaseModel):
 
     status: str = Field(
@@ -202,9 +466,19 @@ class ClinicalMatchResponse(BaseModel):
         description="Response message"
     )
 
+    request_id: str = Field(
+        ...,
+        description="Unique request identifier"
+    )
+
     matches: List[MatchResult] = Field(
         default_factory=list,
         description="Top matched clinical cases"
+    )
+
+    total_matches_found: int = Field(
+        default=0,
+        description="Number of matches returned"
     )
 
     confidence_score: float = Field(
@@ -214,12 +488,27 @@ class ClinicalMatchResponse(BaseModel):
         description="Overall confidence score"
     )
 
-    generated_clinical_context: str = Field(
-        ...,
+    search_query: str = Field(
+        default="",
+        description="Generated search query"
+    )
+
+    generated_context: str = Field(
+        default="",
         description="Dynamically generated clinical context"
     )
 
+    input_fields_used: List[str] = Field(
+        default_factory=list,
+        description="Clinical fields used for matching"
+    )
+
+    processing_time_ms: float = Field(
+        default=0.0,
+        description="API response processing time in milliseconds"
+    )
+
     explanation: str = Field(
-        ...,
+        default="Clinical similarity matching completed successfully",
         description="Explanation of how the result was generated"
     )
