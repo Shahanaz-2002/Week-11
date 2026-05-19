@@ -20,8 +20,7 @@ from models.models import (
     ClinicalMatchRequest,
     ClinicalMatchResponse
 )
-
-from services.clinical_match_service import (
+from services.analyze_service import (
     clinical_match_pipeline
 )
 
