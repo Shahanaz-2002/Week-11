@@ -112,7 +112,12 @@ class ClinicalMatchRequest(BaseModel):
 
     clinical_history: Optional[str] = ""
 
+    additional_findings: Optional[str] = ""
+
+    medications_history: Optional[str] = ""
+
     model_config = ConfigDict(extra="ignore")
+
 
     # =====================================================
     # FIELD CLEANING
@@ -133,6 +138,7 @@ class ClinicalMatchRequest(BaseModel):
                 value = value[:1000]
 
         return value
+
 
     # =====================================================
     # GENDER VALIDATION
@@ -160,8 +166,9 @@ class ClinicalMatchRequest(BaseModel):
 
         return value.title()
 
+
     # =====================================================
-    # AT LEAST ONE FIELD
+    # AT LEAST ONE FIELD VALIDATION
     # =====================================================
 
     @model_validator(mode="after")
@@ -184,8 +191,9 @@ class ClinicalMatchRequest(BaseModel):
 
         return self
 
+
     # =====================================================
-    # QUERY GENERATION
+    # SEARCH QUERY GENERATION
     # =====================================================
 
     def build_search_query(self):
@@ -196,19 +204,29 @@ class ClinicalMatchRequest(BaseModel):
             self.affected_body_part,
             self.symptoms,
             self.subjective_assessment,
+            self.functional_assessment,
             self.physical_examination,
             self.objective_findings,
             self.patient_pain_classification,
-            self.previous_injuries
+            self.previous_injuries,
+            self.clinical_history,
+            self.additional_findings
         ]
 
-        return " | ".join([
-            x for x in fields
+        cleaned_fields = [
+
+            clean_text(x)
+
+            for x in fields
+
             if x not in [None, ""]
-        ])
+        ]
+
+        return " | ".join(cleaned_fields)
+
 
     # =====================================================
-    # CONTEXT GENERATION
+    # GENERATED CONTEXT
     # =====================================================
 
     def build_context(self):
@@ -220,12 +238,23 @@ class ClinicalMatchRequest(BaseModel):
             "Age": self.age,
             "Gender": self.gender,
             "Occupation": self.occupation,
+            "Activity Levels": self.activity_levels,
+            "Doctor Name": self.doctor_name,
             "Chief Complaint": self.chief_complaint,
+            "Affected Body Part": self.affected_body_part,
             "Symptoms Duration": self.symptoms_duration,
+            "Symptoms": self.symptoms,
             "Subjective Assessment": self.subjective_assessment,
+            "Functional Assessment": self.functional_assessment,
             "Physical Examination": self.physical_examination,
             "Objective Findings": self.objective_findings,
-            "Clinical History": self.clinical_history
+            "Pain Classification": self.patient_pain_classification,
+            "Previous Injuries": self.previous_injuries,
+            "Current Medications": self.current_medications,
+            "Allergies": self.allergies,
+            "Clinical History": self.clinical_history,
+            "Doctor Notes": self.doctor_notes,
+            "Additional Findings": self.additional_findings
         }
 
         for key, value in field_map.items():
@@ -237,6 +266,7 @@ class ClinicalMatchRequest(BaseModel):
                 )
 
         return "\n".join(context)
+
 
     # =====================================================
     # AVAILABLE FIELDS
@@ -252,6 +282,63 @@ class ClinicalMatchRequest(BaseModel):
         ]
 
 
+    # =====================================================
+    # PATIENT METADATA
+    # =====================================================
+
+    def get_patient_metadata(self):
+
+        return {
+
+            "age": self.age,
+            "gender": self.gender,
+            "occupation": self.occupation,
+            "activity_levels": self.activity_levels,
+            "doctor_name": self.doctor_name
+        }
+
+
+    # =====================================================
+    # DYNAMIC INPUT PROCESSOR
+    # =====================================================
+
+    def generate_dynamic_inputs(self):
+
+        search_query = self.build_search_query()
+
+        generated_context = self.build_context()
+
+        combined_symptoms = " | ".join([
+
+            x for x in [
+
+                self.symptoms,
+                self.chief_complaint,
+                self.patient_pain_classification,
+                self.subjective_assessment
+            ]
+
+            if x not in [None, ""]
+        ])
+
+        patient_metadata = self.get_patient_metadata()
+
+        available_fields = self.get_available_fields()
+
+        return {
+
+            "search_query": search_query,
+
+            "generated_context": generated_context,
+
+            "combined_symptoms": combined_symptoms,
+
+            "patient_metadata": patient_metadata,
+
+            "available_fields": available_fields
+        }
+
+
 # =========================================================
 # RECOMMENDATION MODEL
 # =========================================================
@@ -261,6 +348,12 @@ class RecommendationModel(BaseModel):
     recommended_tests: List[str] = []
 
     recommended_medicines: List[str] = []
+
+    recommendation_notes: str = ""
+
+    physiotherapy_plan: List[str] = []
+
+    precautions: List[str] = []
 
     model_config = ConfigDict(extra="ignore")
 
@@ -278,6 +371,18 @@ class MatchResult(BaseModel):
         le=1.0
     )
 
+    semantic_score: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0
+    )
+
+    confidence_level: str = "Moderate"
+
+    retrieval_source: str = (
+        "BioBERT Semantic Search"
+    )
+
     chief_complaint: str = "Unknown"
 
     affected_body_part: str = "Unknown"
@@ -286,21 +391,20 @@ class MatchResult(BaseModel):
 
     doctor_notes: str = "No notes available"
 
+    clinical_history: str = ""
+
+    matched_keywords: List[str] = []
+
+    searchable_text: str = ""
+
     explanation: str = (
         "Match generated using semantic similarity"
     )
 
-    matched_keywords: List[str] = []
-
-    confidence_level: str = "Moderate"
-
-    semantic_score: float = 0.0
-
-    retrieval_source: str = "BioBERT Semantic Search"
-
     recommendation: RecommendationModel
 
     model_config = ConfigDict(extra="ignore")
+
 
     # =====================================================
     # CONFIDENCE VALIDATION
@@ -335,7 +439,7 @@ class ClinicalMatchResponse(BaseModel):
 
     request_id: str
 
-    api_version: str = "1.0.0"
+    api_version: str = "5.0.0"
 
     request_timestamp: str = Field(
         default_factory=lambda:
@@ -353,12 +457,16 @@ class ClinicalMatchResponse(BaseModel):
 
     search_query: str = ""
 
-    generated_clinical_context: str = ""
+    generated_context: str = ""
 
     input_fields_used: List[str] = []
 
     processing_time_ms: float = 0.0
 
     explanation: str = ""
+
+    warnings: List[str] = []
+
+    success: bool = True
 
     model_config = ConfigDict(extra="ignore")

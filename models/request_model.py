@@ -1,7 +1,48 @@
-from pydantic import BaseModel, Field, validator
-from typing import Optional, Dict, Any, List
+from pydantic import (
+    BaseModel,
+    Field,
+    field_validator,
+    model_validator,
+    ConfigDict
+)
+
+from typing import (
+    Optional,
+    Dict,
+    Any,
+    List
+)
+
 import re
 
+
+# =========================================================
+# TEXT CLEANER
+# =========================================================
+
+def clean_text(value):
+
+    if value is None:
+        return ""
+
+    value = str(value)
+
+    value = value.strip()
+
+    value = re.sub(r"\s+", " ", value)
+
+    value = re.sub(
+        r"[^\w\s,.\-:/()]",
+        "",
+        value
+    )
+
+    return value
+
+
+# =========================================================
+# REQUEST MODEL
+# =========================================================
 
 class ClinicalMatchRequest(BaseModel):
 
@@ -132,6 +173,18 @@ class ClinicalMatchRequest(BaseModel):
         description="Complete clinical history"
     )
 
+    additional_findings: Optional[str] = Field(
+        default="",
+        max_length=1500,
+        description="Additional clinical findings"
+    )
+
+    medications_history: Optional[str] = Field(
+        default="",
+        max_length=1500,
+        description="Medication usage history"
+    )
+
     # =====================================================
     # SYSTEM GENERATED FIELDS
     # =====================================================
@@ -146,11 +199,15 @@ class ClinicalMatchRequest(BaseModel):
         description="Generated clinical context for retrieval"
     )
 
+    model_config = ConfigDict(
+        extra="ignore"
+    )
+
     # =====================================================
     # TEXT CLEANING VALIDATOR
     # =====================================================
 
-    @validator(
+    @field_validator(
         "chief_complaint",
         "affected_body_part",
         "symptoms_duration",
@@ -169,110 +226,120 @@ class ClinicalMatchRequest(BaseModel):
         "symptoms",
         "doctor_notes",
         "clinical_history",
-        pre=True,
-        always=True
+        "additional_findings",
+        "medications_history",
+        mode="before"
     )
-    def validate_optional_strings(cls, v):
+    @classmethod
+    def validate_optional_strings(
+        cls,
+        value
+    ):
 
-        if v is None:
+        if value is None:
             return ""
 
-        # Convert to string
-        v = str(v)
+        value = clean_text(value)
 
-        # Remove leading/trailing spaces
-        v = v.strip()
-
-        # Remove multiple spaces
-        v = re.sub(r"\s+", " ", v)
-
-        # Remove unwanted special characters
-        v = re.sub(r"[^\w\s,.\-:/()]", "", v)
-
-        return v
+        return value
 
     # =====================================================
     # AGE VALIDATION
     # =====================================================
 
-    @validator("age")
-    def validate_age(cls, v):
+    @field_validator("age")
+    @classmethod
+    def validate_age(
+        cls,
+        value
+    ):
 
-        if v is None:
-            return v
+        if value is None:
+            return value
 
-        if v < 0 or v > 120:
+        if value < 0 or value > 120:
+
             raise ValueError(
                 "Age must be between 0 and 120"
             )
 
-        return v
+        return value
 
     # =====================================================
     # GENDER VALIDATION
     # =====================================================
 
-    @validator("gender")
-    def validate_gender(cls, v):
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(
+        cls,
+        value
+    ):
 
-        if not v:
+        if not value:
             return ""
 
         allowed = [
+
             "male",
             "female",
             "other",
             "prefer not to say"
         ]
 
-        if v.lower() not in allowed:
+        if value.lower() not in allowed:
+
             raise ValueError(
                 "Gender must be Male, Female, Other, or Prefer not to say"
             )
 
-        return v.title()
+        return value.title()
 
     # =====================================================
     # AT LEAST ONE FIELD VALIDATION
     # =====================================================
 
-    @validator("*", pre=False)
+    @model_validator(mode="after")
     def validate_at_least_one_field(
-        cls,
-        v,
-        values,
-        **kwargs
+        self
     ):
 
-        if kwargs["field"].name == "generated_context":
+        values = self.model_dump()
 
-            valid_fields = [
-                field
-                for field in values.values()
-                if field not in [None, "", [], {}]
-            ]
+        non_empty = [
 
-            if len(valid_fields) == 0:
+            field
 
-                raise ValueError(
-                    "At least one clinical input field is required"
-                )
+            for field in values.values()
 
-        return v
+            if field not in [None, "", [], {}]
+        ]
+
+        if len(non_empty) == 0:
+
+            raise ValueError(
+                "At least one clinical input field is required"
+            )
+
+        return self
 
     # =====================================================
     # AVAILABLE INPUT FIELDS
     # =====================================================
 
-    def get_available_fields(self) -> List[str]:
+    def get_available_fields(
+        self
+    ) -> List[str]:
 
         available_fields = []
 
-        for field_name, value in self.dict().items():
+        for field_name, value in self.model_dump().items():
 
             if value not in [None, "", [], {}]:
 
-                available_fields.append(field_name)
+                available_fields.append(
+                    field_name
+                )
 
         return available_fields
 
@@ -280,28 +347,36 @@ class ClinicalMatchRequest(BaseModel):
     # SEARCH QUERY GENERATION
     # =====================================================
 
-    def build_search_query(self) -> str:
+    def build_search_query(
+        self
+    ) -> str:
 
         components = []
 
         weighted_fields = [
+
             self.chief_complaint,
             self.affected_body_part,
             self.symptoms,
             self.subjective_assessment,
+            self.functional_assessment,
             self.physical_examination,
             self.objective_findings,
             self.patient_pain_classification,
             self.previous_injuries,
-            self.functional_assessment
+            self.clinical_history,
+            self.additional_findings
         ]
 
         for item in weighted_fields:
 
-            if item:
+            if item not in [None, ""]:
+
                 components.append(item)
 
-        search_query = " | ".join(components)
+        search_query = " | ".join(
+            components
+        )
 
         return search_query.strip()
 
@@ -309,11 +384,14 @@ class ClinicalMatchRequest(BaseModel):
     # CONTEXT GENERATION
     # =====================================================
 
-    def build_context(self) -> str:
+    def build_context(
+        self
+    ) -> str:
 
         context_parts = []
 
         field_mappings = {
+
             "Age": self.age,
             "Gender": self.gender,
             "Occupation": self.occupation,
@@ -332,7 +410,8 @@ class ClinicalMatchRequest(BaseModel):
             "Symptoms": self.symptoms,
             "Doctor Notes": self.doctor_notes,
             "Clinical History": self.clinical_history,
-            "Doctor Name": self.doctor_name
+            "Doctor Name": self.doctor_name,
+            "Additional Findings": self.additional_findings
         }
 
         for field_name, value in field_mappings.items():
@@ -343,15 +422,20 @@ class ClinicalMatchRequest(BaseModel):
                     f"{field_name}: {value}"
                 )
 
-        return "\n".join(context_parts)
+        return "\n".join(
+            context_parts
+        )
 
     # =====================================================
     # COMBINED SYMPTOMS GENERATION
     # =====================================================
 
-    def build_combined_symptoms(self) -> str:
+    def build_combined_symptoms(
+        self
+    ) -> str:
 
         symptom_parts = [
+
             self.chief_complaint,
             self.subjective_assessment,
             self.objective_findings,
@@ -361,8 +445,11 @@ class ClinicalMatchRequest(BaseModel):
         ]
 
         combined = " ".join([
+
             str(part)
+
             for part in symptom_parts
+
             if part not in [None, "", []]
         ])
 
@@ -372,13 +459,20 @@ class ClinicalMatchRequest(BaseModel):
     # PATIENT METADATA GENERATION
     # =====================================================
 
-    def build_patient_metadata(self) -> Dict[str, Any]:
+    def build_patient_metadata(
+        self
+    ) -> Dict[str, Any]:
 
         return {
+
             "age": self.age,
+
             "gender": self.gender,
+
             "occupation": self.occupation,
+
             "activity_levels": self.activity_levels,
+
             "doctor_name": self.doctor_name
         }
 
@@ -386,22 +480,44 @@ class ClinicalMatchRequest(BaseModel):
     # COMPLETE DYNAMIC PROCESSING
     # =====================================================
 
-    def generate_dynamic_inputs(self) -> Dict[str, Any]:
+    def generate_dynamic_inputs(
+        self
+    ) -> Dict[str, Any]:
 
-        search_query = self.build_search_query()
+        search_query = (
+            self.build_search_query()
+        )
 
-        generated_context = self.build_context()
+        generated_context = (
+            self.build_context()
+        )
 
-        combined_symptoms = self.build_combined_symptoms()
+        combined_symptoms = (
+            self.build_combined_symptoms()
+        )
 
-        patient_metadata = self.build_patient_metadata()
+        patient_metadata = (
+            self.build_patient_metadata()
+        )
 
-        available_fields = self.get_available_fields()
+        available_fields = (
+            self.get_available_fields()
+        )
 
         return {
-            "search_query": search_query,
-            "generated_context": generated_context,
-            "combined_symptoms": combined_symptoms,
-            "patient_metadata": patient_metadata,
-            "available_fields": available_fields
+
+            "search_query":
+                search_query,
+
+            "generated_context":
+                generated_context,
+
+            "combined_symptoms":
+                combined_symptoms,
+
+            "patient_metadata":
+                patient_metadata,
+
+            "available_fields":
+                available_fields
         }

@@ -4,6 +4,7 @@ import logging
 import json
 import time
 import re
+from typing import List
 
 from transformers import (
     AutoTokenizer,
@@ -11,6 +12,17 @@ from transformers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# =========================================================
+# LOGGING CONFIGURATION
+# =========================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    force=True
+)
 
 
 # =========================================================
@@ -37,7 +49,7 @@ def log_event(event_type, message, extra=None):
 
 def clean_text(text):
 
-    if not text:
+    if text is None:
         return ""
 
     text = str(text)
@@ -50,43 +62,62 @@ def clean_text(text):
 
 
 # =========================================================
-# DERMATOLOGY KEYWORD ENHANCEMENT
+# CLINICAL KEYWORD ENHANCEMENT
 # =========================================================
 
-def enrich_dermatology_text(text):
+def enrich_clinical_text(text):
 
     text = clean_text(text)
 
-    dermatology_keywords = [
-        "acne",
-        "eczema",
-        "psoriasis",
-        "rash",
-        "lesion",
-        "pigmentation",
-        "hyperpigmentation",
-        "papules",
-        "pustules",
-        "itching",
-        "skin inflammation",
-        "dermatitis",
-        "redness",
-        "dry skin",
-        "fungal infection"
+    clinical_keywords = [
+
+        "pain",
+        "swelling",
+        "fracture",
+        "injury",
+        "stiffness",
+        "mobility",
+        "inflammation",
+        "muscle",
+        "joint",
+        "sprain",
+        "tenderness",
+        "weakness",
+        "arthritis",
+        "back pain",
+        "knee pain",
+        "shoulder pain",
+        "neck pain",
+        "posture",
+        "movement restriction",
+        "functional limitation",
+        "physical examination",
+        "objective findings",
+        "clinical history",
+        "range of motion",
+        "sports injury",
+        "ligament injury",
+        "rehabilitation"
     ]
 
     lower_text = text.lower()
 
     matched_keywords = []
 
-    for keyword in dermatology_keywords:
+    for keyword in clinical_keywords:
 
         if keyword in lower_text:
+
             matched_keywords.append(keyword)
+
+    matched_keywords = list(set(matched_keywords))
 
     if matched_keywords:
 
-        text += " | " + " ".join(matched_keywords)
+        text += (
+            " | " +
+            " ".join(matched_keywords)
+        )
 
     return text
 
@@ -119,8 +150,11 @@ class BioBERTEmbedding:
                 # -------------------------------------------------
 
                 cls._instance.device = torch.device(
+
                     "cuda"
+
                     if torch.cuda.is_available()
+
                     else "cpu"
                 )
 
@@ -133,8 +167,7 @@ class BioBERTEmbedding:
                 )
 
                 print(
-                    "🔄 Loading BioClinicalBERT model "
-                    "(only once)..."
+                    "\n🔄 Loading BioClinicalBERT model..."
                 )
 
                 log_event(
@@ -168,12 +201,18 @@ class BioBERTEmbedding:
 
                 cls._instance.model.eval()
 
+                print(
+                    "✅ BioClinicalBERT loaded successfully\n"
+                )
+
                 log_event(
                     "model_loaded",
                     "BioClinicalBERT loaded successfully",
                     {
                         "device":
-                            str(cls._instance.device)
+                            str(
+                                cls._instance.device
+                            )
                     }
                 )
 
@@ -205,7 +244,9 @@ class BioBERTEmbedding:
             token_embeddings.size()
         ).float()
 
-        masked_embeddings = token_embeddings * mask
+        masked_embeddings = (
+            token_embeddings * mask
+        )
 
         summed_embeddings = torch.sum(
             masked_embeddings,
@@ -224,7 +265,7 @@ class BioBERTEmbedding:
         return pooled_embedding
 
     # =====================================================
-    # GENERATE EMBEDDING
+    # GENERATE SINGLE EMBEDDING
     # =====================================================
 
     def get_embedding(
@@ -259,16 +300,16 @@ class BioBERTEmbedding:
             )
 
         # -------------------------------------------------
-        # DERMATOLOGY ENRICHMENT
+        # CLINICAL ENRICHMENT
         # -------------------------------------------------
 
-        enriched_text = enrich_dermatology_text(
+        enriched_text = enrich_clinical_text(
             text
         )
 
         log_event(
             "text_enriched",
-            "Dermatology text enhanced",
+            "Clinical text enhanced",
             {
                 "original_length":
                     len(text),
@@ -298,7 +339,9 @@ class BioBERTEmbedding:
             )
 
             inputs = {
+
                 k: v.to(self.device)
+
                 for k, v in inputs.items()
             }
 
@@ -322,7 +365,9 @@ class BioBERTEmbedding:
 
             with torch.no_grad():
 
-                outputs = self.model(**inputs)
+                outputs = self.model(
+                    **inputs
+                )
 
         except Exception as e:
 
@@ -351,13 +396,18 @@ class BioBERTEmbedding:
             )
 
             pooled_embedding = self.mean_pooling(
+
                 token_embeddings,
+
                 attention_mask
             )
 
             embedding = (
+
                 pooled_embedding
+
                 .cpu()
+
                 .numpy()[0]
             )
 
@@ -408,13 +458,16 @@ class BioBERTEmbedding:
         # -------------------------------------------------
 
         total_time = round(
-            (time.time() - start_time) * 1000,
+            (
+                time.time() -
+                start_time
+            ) * 1000,
             2
         )
 
         log_event(
             "embedding_generated",
-            "Dermatology embedding generated successfully",
+            "Clinical embedding generated successfully",
             {
                 "embedding_dimension":
                     len(embedding),
@@ -427,17 +480,23 @@ class BioBERTEmbedding:
         return embedding
 
     # =====================================================
-    # BATCH EMBEDDINGS
+    # GENERATE BATCH EMBEDDINGS
     # =====================================================
 
     def get_batch_embeddings(
         self,
-        texts
-    ):
+        texts: List[str]
+    ) -> List[np.ndarray]:
 
         embeddings = []
 
-        for text in texts:
+        if not isinstance(texts, list):
+
+            raise ValueError(
+                "texts must be a list"
+            )
+
+        for index, text in enumerate(texts):
 
             try:
 
@@ -455,10 +514,41 @@ class BioBERTEmbedding:
                     "batch_embedding_error",
                     "Error generating batch embedding",
                     {
+                        "index": index,
                         "error": str(e)
                     }
                 )
 
                 continue
 
+        log_event(
+            "batch_embedding_completed",
+            "Batch embedding generation completed",
+            {
+                "total_inputs":
+                    len(texts),
+
+                "successful_embeddings":
+                    len(embeddings)
+            }
+        )
+
         return embeddings
+
+    # =====================================================
+    # EMBEDDING DIMENSION
+    # =====================================================
+
+    def get_embedding_dimension(self):
+
+        try:
+
+            sample_embedding = self.get_embedding(
+                "sample clinical text"
+            )
+
+            return len(sample_embedding)
+
+        except Exception:
+
+            return 768

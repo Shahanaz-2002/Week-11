@@ -1,4 +1,5 @@
 import time
+import traceback
 from fastapi import HTTPException
 
 from retrieval.retrieval_engine import retrieve_similar_cases
@@ -18,6 +19,19 @@ try:
 except Exception:
 
     case_database = []
+
+
+# =========================================================
+# SAFE TEXT HELPER
+# =========================================================
+
+def safe_text(value):
+
+    if value in [None, "", [], {}]:
+
+        return ""
+
+    return str(value).strip()
 
 
 # =========================================================
@@ -46,11 +60,11 @@ def build_search_query(request):
 
     for field in weighted_fields:
 
-        if field not in [None, "", [], {}]:
+        cleaned = safe_text(field)
 
-            query_parts.append(
-                str(field).strip()
-            )
+        if cleaned:
+
+            query_parts.append(cleaned)
 
     return " | ".join(query_parts).strip()
 
@@ -89,10 +103,12 @@ def build_clinical_context(request):
 
     for field_name, value in field_mapping.items():
 
-        if value not in [None, "", [], {}]:
+        cleaned = safe_text(value)
+
+        if cleaned:
 
             context_parts.append(
-                f"{field_name}: {value}"
+                f"{field_name}: {cleaned}"
             )
 
     return "\n".join(context_parts)
@@ -111,16 +127,24 @@ def generate_recommendations(case):
         "recommended_medicines": []
     }
 
-    complaint = str(
-        case.get("chief_complaint", "")
+    complaint = safe_text(
+        case.get("chief_complaint")
     ).lower()
 
-    body_part = str(
-        case.get("affected_body_part", "")
+    body_part = safe_text(
+        case.get("affected_body_part")
+    ).lower()
+
+    symptoms = safe_text(
+        case.get("searchable_text")
     ).lower()
 
     combined_text = (
-        complaint + " " + body_part
+        complaint +
+        " " +
+        body_part +
+        " " +
+        symptoms
     ).lower()
 
     # =====================================================
@@ -133,7 +157,8 @@ def generate_recommendations(case):
 
             "Knee X-Ray",
             "MRI Knee",
-            "Physical Stability Test"
+            "Anterior Drawer Test",
+            "Physical Stability Assessment"
         ]
 
         recommendations["recommended_medicines"] = [
@@ -150,8 +175,9 @@ def generate_recommendations(case):
 
         recommendations["recommended_tests"] = [
 
-            "Spine MRI",
-            "Posture Assessment"
+            "Lumbar Spine MRI",
+            "Posture Assessment",
+            "Straight Leg Raise Test"
         ]
 
         recommendations["recommended_medicines"] = [
@@ -169,7 +195,8 @@ def generate_recommendations(case):
         recommendations["recommended_tests"] = [
 
             "Shoulder MRI",
-            "Rotator Cuff Examination"
+            "Rotator Cuff Examination",
+            "Shoulder Mobility Test"
         ]
 
         recommendations["recommended_medicines"] = [
@@ -179,13 +206,33 @@ def generate_recommendations(case):
         ]
 
     # =====================================================
+    # NECK CONDITIONS
+    # =====================================================
+
+    elif "neck" in combined_text:
+
+        recommendations["recommended_tests"] = [
+
+            "Cervical Spine X-Ray",
+            "Neck Mobility Assessment"
+        ]
+
+        recommendations["recommended_medicines"] = [
+
+            "Muscle Relaxant",
+            "Paracetamol"
+        ]
+
+    # =====================================================
     # SKIN / DERMATOLOGY
     # =====================================================
 
     elif (
+
         "skin" in combined_text or
         "rash" in combined_text or
         "acne" in combined_text
+
     ):
 
         recommendations["recommended_tests"] = [
@@ -246,19 +293,16 @@ def generate_similarity_reason(case):
 
     keywords = []
 
-    complaint = case.get(
-        "chief_complaint",
-        ""
+    complaint = safe_text(
+        case.get("chief_complaint")
     )
 
-    body_part = case.get(
-        "affected_body_part",
-        ""
+    body_part = safe_text(
+        case.get("affected_body_part")
     )
 
-    findings = case.get(
-        "objective_findings",
-        ""
+    findings = safe_text(
+        case.get("objective_findings")
     )
 
     if complaint:
@@ -284,6 +328,117 @@ def generate_similarity_reason(case):
 
 
 # =========================================================
+# HELPER FUNCTION:
+# SANITIZE MATCH
+# =========================================================
+
+def sanitize_match(case):
+
+    similarity_score = round(
+
+        float(
+            case.get(
+                "similarity",
+                0.0
+            )
+        ),
+
+        4
+    )
+
+    similarity_score = max(
+        0.0,
+        min(
+            1.0,
+            similarity_score
+        )
+    )
+
+    recommendations = (
+        generate_recommendations(case)
+    )
+
+    return {
+
+        "case_id":
+            str(
+                case.get(
+                    "case_id",
+                    "Unknown"
+                )
+            ),
+
+        "match_score":
+            similarity_score,
+
+        "confidence_level":
+            get_confidence_level(
+                similarity_score
+            ),
+
+        "chief_complaint":
+            case.get(
+                "chief_complaint",
+                "Unknown"
+            ),
+
+        "affected_body_part":
+            case.get(
+                "affected_body_part",
+                "Unknown"
+            ),
+
+        "symptoms_duration":
+            case.get(
+                "symptoms_duration",
+                "Unknown"
+            ),
+
+        "doctor_notes":
+            case.get(
+                "doctor_notes",
+                "No notes available"
+            ),
+
+        "matched_keywords":
+            case.get(
+                "matched_keywords",
+                []
+            ),
+
+        "semantic_score":
+            similarity_score,
+
+        "retrieval_source":
+            "BioBERT Semantic Retrieval",
+
+        "explanation":
+            generate_similarity_reason(
+                case
+            ),
+
+        "recommendation": {
+
+            "recommended_tests":
+                case.get(
+                    "recommended_tests",
+                    recommendations[
+                        "recommended_tests"
+                    ]
+                ),
+
+            "recommended_medicines":
+                case.get(
+                    "recommended_medicines",
+                    recommendations[
+                        "recommended_medicines"
+                    ]
+                )
+        }
+    }
+
+
+# =========================================================
 # MAIN PIPELINE
 # =========================================================
 
@@ -300,6 +455,25 @@ def clinical_match_pipeline(
     start_time = time.time()
 
     try:
+
+        # =================================================
+        # DATABASE VALIDATION
+        # =================================================
+
+        if not isinstance(case_database, list):
+
+            raise HTTPException(
+
+                status_code=500,
+
+                detail={
+                    "status":
+                        "Failed",
+
+                    "message":
+                        "Invalid case database"
+                }
+            )
 
         # =================================================
         # DYNAMIC QUERY GENERATION
@@ -321,13 +495,21 @@ def clinical_match_pipeline(
 
             combined_symptoms = " ".join([
 
-                str(request.chief_complaint),
+                safe_text(
+                    request.chief_complaint
+                ),
 
-                str(request.subjective_assessment),
+                safe_text(
+                    request.subjective_assessment
+                ),
 
-                str(request.objective_findings),
+                safe_text(
+                    request.objective_findings
+                ),
 
-                str(request.symptoms)
+                safe_text(
+                    request.symptoms
+                )
 
             ]).strip()
 
@@ -342,6 +524,7 @@ def clinical_match_pipeline(
                 status_code=400,
 
                 detail={
+
                     "error":
                         "Invalid Input",
 
@@ -361,7 +544,11 @@ def clinical_match_pipeline(
                 request_id,
                 "Clinical input processed successfully",
                 {
-                    "search_query": search_query
+                    "search_query":
+                        search_query,
+
+                    "combined_symptoms":
+                        combined_symptoms
                 }
             )
 
@@ -389,7 +576,9 @@ def clinical_match_pipeline(
                     request_id,
                     "Similarity retrieval failed",
                     {
-                        "error": str(e)
+                        "error": str(e),
+                        "traceback":
+                            traceback.format_exc()
                     }
                 )
 
@@ -398,6 +587,7 @@ def clinical_match_pipeline(
                 status_code=500,
 
                 detail={
+
                     "error":
                         "Retrieval Failure",
 
@@ -467,118 +657,28 @@ def clinical_match_pipeline(
 
             try:
 
-                similarity_score = round(
-
-                    float(
-                        case.get(
-                            "similarity",
-                            0.0
-                        )
-                    ),
-
-                    4
+                formatted_case = sanitize_match(
+                    case
                 )
-
-                similarity_score = max(
-                    0.0,
-                    min(
-                        1.0,
-                        similarity_score
-                    )
-                )
-
-                recommendations = (
-                    generate_recommendations(
-                        case
-                    )
-                )
-
-                formatted_case = {
-
-                    "case_id":
-                        str(
-                            case.get(
-                                "case_id",
-                                "Unknown"
-                            )
-                        ),
-
-                    "match_score":
-                        similarity_score,
-
-                    "confidence_level":
-                        get_confidence_level(
-                            similarity_score
-                        ),
-
-                    "chief_complaint":
-                        case.get(
-                            "chief_complaint",
-                            "Unknown"
-                        ),
-
-                    "affected_body_part":
-                        case.get(
-                            "affected_body_part",
-                            "Unknown"
-                        ),
-
-                    "symptoms_duration":
-                        case.get(
-                            "symptoms_duration",
-                            "Unknown"
-                        ),
-
-                    "doctor_notes":
-                        case.get(
-                            "doctor_notes",
-                            "No notes available"
-                        ),
-
-                    "recommended_tests":
-                        case.get(
-                            "recommended_tests",
-                            recommendations[
-                                "recommended_tests"
-                            ]
-                        ),
-
-                    "recommended_medicines":
-                        case.get(
-                            "recommended_medicines",
-                            recommendations[
-                                "recommended_medicines"
-                            ]
-                        ),
-
-                    "matched_keywords": [
-
-                        str(
-                            case.get(
-                                "chief_complaint",
-                                ""
-                            )
-                        ),
-
-                        str(
-                            case.get(
-                                "affected_body_part",
-                                ""
-                            )
-                        )
-                    ],
-
-                    "similarity_reason":
-                        generate_similarity_reason(
-                            case
-                        )
-                }
 
                 formatted_matches.append(
                     formatted_case
                 )
 
-            except Exception:
+            except Exception as formatting_error:
+
+                if log_event:
+
+                    log_event(
+                        "match_format_error",
+                        request_id,
+                        "Failed to format match",
+                        {
+                            "error":
+                                str(formatting_error)
+                        }
+                    )
+
                 continue
 
         # =================================================
@@ -592,6 +692,7 @@ def clinical_match_pipeline(
                 status_code=500,
 
                 detail={
+
                     "error":
                         "Formatting Failure",
 
@@ -646,7 +747,10 @@ def clinical_match_pipeline(
                         len(formatted_matches),
 
                     "processing_time_ms":
-                        total_time
+                        total_time,
+
+                    "confidence_score":
+                        confidence_score
                 }
             )
 
@@ -711,7 +815,9 @@ def clinical_match_pipeline(
                 request_id,
                 "Clinical pipeline failure",
                 {
-                    "error": str(e)
+                    "error": str(e),
+                    "traceback":
+                        traceback.format_exc()
                 }
             )
 

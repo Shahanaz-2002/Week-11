@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Any
 import numpy as np
 import logging
 import json
@@ -6,6 +6,17 @@ import time
 import re
 
 from retrieval.embedding import BioBERTEmbedding
+
+
+# =========================================================
+# LOGGER CONFIGURATION
+# =========================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    force=True
+)
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +28,14 @@ logger = logging.getLogger(__name__)
 try:
 
     embedder = BioBERTEmbedding()
+
+    logger.info(
+        json.dumps({
+            "event": "embedder_initialized",
+            "status": "success",
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        })
+    )
 
 except Exception as e:
 
@@ -35,7 +54,11 @@ except Exception as e:
 # LOGGING HELPER
 # =========================================================
 
-def log_event(event_type, message, extra=None):
+def log_event(
+    event_type: str,
+    message: str,
+    extra: Dict[str, Any] = None
+):
 
     log_data = {
 
@@ -58,9 +81,10 @@ def log_event(event_type, message, extra=None):
 # TEXT CLEANING
 # =========================================================
 
-def clean_text(text):
+def clean_text(text: Any) -> str:
 
     if text is None:
+
         return ""
 
     text = str(text)
@@ -76,7 +100,7 @@ def clean_text(text):
 # QUERY ENHANCEMENT
 # =========================================================
 
-def enhance_query(query_text):
+def enhance_query(query_text: str) -> str:
 
     query_text = clean_text(query_text)
 
@@ -100,7 +124,14 @@ def enhance_query(query_text):
         "back",
         "knee",
         "shoulder",
-        "neck"
+        "neck",
+        "hip",
+        "elbow",
+        "ankle",
+        "spine",
+        "nerve",
+        "ligament",
+        "tear"
     ]
 
     detected_keywords = []
@@ -160,8 +191,8 @@ def cosine_similarity(
     except Exception as e:
 
         log_event(
-            "cosine_error",
-            "Error during cosine similarity",
+            "cosine_similarity_error",
+            "Cosine similarity calculation failed",
             {
                 "error": str(e)
             }
@@ -171,29 +202,33 @@ def cosine_similarity(
 
 
 # =========================================================
-# BUILD CASE SEARCH TEXT
+# BUILD CASE SEARCHABLE TEXT
 # =========================================================
 
-def build_case_search_text(case_data):
+def build_case_search_text(
+    case_data: Dict
+) -> str:
 
     text_parts = []
 
-    fields = [
+    searchable_fields = [
 
         "chief_complaint",
         "affected_body_part",
         "symptoms",
         "subjective_assessment",
+        "functional_assessment",
         "physical_examination",
         "objective_findings",
         "doctor_notes",
         "clinical_history",
         "case_description",
         "previous_injuries",
-        "symptoms_duration"
+        "symptoms_duration",
+        "patient_pain_classification"
     ]
 
-    for field in fields:
+    for field in searchable_fields:
 
         value = case_data.get(field, "")
 
@@ -211,19 +246,26 @@ def build_case_search_text(case_data):
 # =========================================================
 
 def extract_matched_keywords(
-    query_text,
-    searchable_text
-):
+    query_text: str,
+    searchable_text: str
+) -> List[str]:
 
     query_words = set(
-        clean_text(query_text).lower().split()
+
+        clean_text(query_text)
+        .lower()
+        .split()
     )
 
     searchable_words = set(
-        clean_text(searchable_text).lower().split()
+
+        clean_text(searchable_text)
+        .lower()
+        .split()
     )
 
     matched = list(
+
         query_words.intersection(
             searchable_words
         )
@@ -231,7 +273,9 @@ def extract_matched_keywords(
 
     matched = [
 
-        word.strip(".,!?;:()[]{}")
+        word.strip(
+            ".,!?;:()[]{}"
+        )
 
         for word in matched
 
@@ -244,13 +288,13 @@ def extract_matched_keywords(
 
 
 # =========================================================
-# BOOST SCORE FOR IMPORTANT MATCHES
+# KEYWORD BOOSTING
 # =========================================================
 
 def apply_keyword_boost(
-    similarity_score,
-    matched_keywords
-):
+    similarity_score: float,
+    matched_keywords: List[str]
+) -> float:
 
     boost = min(
         0.10,
@@ -259,36 +303,95 @@ def apply_keyword_boost(
 
     boosted_score = similarity_score + boost
 
-    return min(boosted_score, 1.0)
+    boosted_score = min(
+        boosted_score,
+        1.0
+    )
+
+    return boosted_score
 
 
 # =========================================================
-# GENERATE CONFIDENCE LEVEL
+# CONFIDENCE LEVEL
 # =========================================================
 
-def get_confidence_level(score):
+def get_confidence_level(
+    score: float
+) -> str:
 
     if score >= 0.85:
+
         return "High"
 
     if score >= 0.60:
+
         return "Moderate"
 
     return "Low"
 
 
 # =========================================================
-# SAFE CASE FIELD ACCESS
+# SAFE CASE VALUE ACCESS
 # =========================================================
 
-def safe_case_value(case_data, field, default="Unknown"):
+def safe_case_value(
+    case_data: Dict,
+    field: str,
+    default="Unknown"
+):
 
     value = case_data.get(field, default)
 
     if value in [None, ""]:
+
         return default
 
     return value
+
+
+# =========================================================
+# NORMALIZE EMBEDDING
+# =========================================================
+
+def normalize_embedding(
+    embedding
+) -> np.ndarray:
+
+    embedding = np.array(
+        embedding,
+        dtype=np.float32
+    )
+
+    norm = np.linalg.norm(embedding)
+
+    if norm == 0:
+
+        return embedding
+
+    return embedding / norm
+
+
+# =========================================================
+# VALIDATE CASE RECORD
+# =========================================================
+
+def validate_case_record(
+    case_data
+) -> bool:
+
+    if not isinstance(case_data, dict):
+
+        return False
+
+    if "embedding" not in case_data:
+
+        return False
+
+    if not case_data.get("embedding"):
+
+        return False
+
+    return True
 
 
 # =========================================================
@@ -304,12 +407,12 @@ def retrieve_similar_cases(
     start_time = time.time()
 
     # =====================================================
-    # LOG RETRIEVAL START
+    # INITIAL LOGGING
     # =====================================================
 
     log_event(
         "retrieval_started",
-        "Clinical retrieval started",
+        "Clinical similarity retrieval started",
         {
             "query_length":
                 len(query_text)
@@ -333,7 +436,7 @@ def retrieve_similar_cases(
 
         log_event(
             "validation_error",
-            "Empty clinical query received"
+            "Empty query received"
         )
 
         return []
@@ -342,7 +445,7 @@ def retrieve_similar_cases(
 
         log_event(
             "validation_error",
-            "Query is not string"
+            "Query must be string"
         )
 
         return []
@@ -362,12 +465,16 @@ def retrieve_similar_cases(
 
         log_event(
             "validation_error",
-            "Invalid case database"
+            "Case database is invalid"
         )
 
         return []
 
-    if not isinstance(top_k, int) or top_k <= 0:
+    if not isinstance(top_k, int):
+
+        top_k = 2
+
+    if top_k <= 0:
 
         top_k = 2
 
@@ -381,7 +488,7 @@ def retrieve_similar_cases(
 
     log_event(
         "query_enhanced",
-        "Clinical query enhanced",
+        "Clinical query enhanced successfully",
         {
             "enhanced_query":
                 enhanced_query
@@ -424,7 +531,7 @@ def retrieve_similar_cases(
 
             return []
 
-        query_embedding = np.array(
+        query_embedding = normalize_embedding(
             query_embedding
         )
 
@@ -432,22 +539,24 @@ def retrieve_similar_cases(
 
             log_event(
                 "embedding_failure",
-                "Empty query embedding generated"
+                "Query embedding is empty"
             )
 
             return []
 
         embedding_time = round(
+
             (
                 time.time() -
                 embedding_start
             ) * 1000,
+
             2
         )
 
         log_event(
             "embedding_generated",
-            "Query embedding generated",
+            "Query embedding generated successfully",
             {
                 "embedding_dimension":
                     len(query_embedding),
@@ -481,18 +590,24 @@ def retrieve_similar_cases(
 
     for case_data in case_database:
 
-        if not isinstance(case_data, dict):
-
-            skipped_cases += 1
-            continue
-
         try:
 
             # ------------------------------------------------
-            # CASE EMBEDDING
+            # CASE VALIDATION
             # ------------------------------------------------
 
-            case_embedding = np.array(
+            if not validate_case_record(case_data):
+
+                skipped_cases += 1
+
+                continue
+
+            # ------------------------------------------------
+            # LOAD CASE EMBEDDING
+            # ------------------------------------------------
+
+            case_embedding = normalize_embedding(
+
                 case_data.get(
                     "embedding",
                     []
@@ -502,19 +617,21 @@ def retrieve_similar_cases(
             if case_embedding.size == 0:
 
                 skipped_cases += 1
+
                 continue
 
             # ------------------------------------------------
-            # DIMENSION CHECK
+            # DIMENSION VALIDATION
             # ------------------------------------------------
 
             if len(query_embedding) != len(case_embedding):
 
                 skipped_cases += 1
+
                 continue
 
             # ------------------------------------------------
-            # COSINE SIMILARITY
+            # SEMANTIC SIMILARITY
             # ------------------------------------------------
 
             similarity_score = cosine_similarity(
@@ -523,7 +640,7 @@ def retrieve_similar_cases(
             )
 
             # ------------------------------------------------
-            # SEARCHABLE TEXT
+            # BUILD SEARCHABLE TEXT
             # ------------------------------------------------
 
             searchable_text = (
@@ -533,7 +650,7 @@ def retrieve_similar_cases(
             )
 
             # ------------------------------------------------
-            # MATCHED KEYWORDS
+            # KEYWORD MATCHING
             # ------------------------------------------------
 
             matched_keywords = (
@@ -544,7 +661,7 @@ def retrieve_similar_cases(
             )
 
             # ------------------------------------------------
-            # BOOSTED SCORE
+            # BOOST FINAL SCORE
             # ------------------------------------------------
 
             boosted_score = apply_keyword_boost(
@@ -553,7 +670,7 @@ def retrieve_similar_cases(
             )
 
             # ------------------------------------------------
-            # FILTER LOW SCORES
+            # LOW SCORE FILTER
             # ------------------------------------------------
 
             if boosted_score < 0.20:
@@ -561,7 +678,7 @@ def retrieve_similar_cases(
                 continue
 
             # ------------------------------------------------
-            # RESULT OBJECT
+            # BUILD RESULT OBJECT
             # ------------------------------------------------
 
             result_object = {
@@ -575,6 +692,12 @@ def retrieve_similar_cases(
                 "similarity":
                     round(
                         boosted_score,
+                        4
+                    ),
+
+                "semantic_score":
+                    round(
+                        similarity_score,
                         4
                     ),
 
@@ -610,6 +733,13 @@ def retrieve_similar_cases(
                         ""
                     ),
 
+                "objective_findings":
+                    safe_case_value(
+                        case_data,
+                        "objective_findings",
+                        ""
+                    ),
+
                 "recommended_tests":
                     case_data.get(
                         "recommended_tests",
@@ -630,15 +760,22 @@ def retrieve_similar_cases(
                         boosted_score
                     ),
 
+                "retrieval_source":
+                    "BioBERT Semantic Retrieval",
+
                 "searchable_text":
                     searchable_text
             }
 
-            results.append(result_object)
+            results.append(
+                result_object
+            )
 
             processed_cases += 1
 
         except Exception as e:
+
+            skipped_cases += 1
 
             log_event(
                 "case_processing_error",
@@ -673,7 +810,8 @@ def retrieve_similar_cases(
 
             results,
 
-            key=lambda x: x["similarity"],
+            key=lambda x:
+                x["similarity"],
 
             reverse=True
         )
@@ -684,7 +822,7 @@ def retrieve_similar_cases(
 
         log_event(
             "sorting_error",
-            "Sorting failed",
+            "Result sorting failed",
             {
                 "error": str(e)
             }
@@ -697,13 +835,18 @@ def retrieve_similar_cases(
     # =====================================================
 
     total_time = round(
-        (time.time() - start_time) * 1000,
+
+        (
+            time.time() -
+            start_time
+        ) * 1000,
+
         2
     )
 
     log_event(
         "retrieval_completed",
-        "Clinical retrieval completed",
+        "Clinical retrieval completed successfully",
         {
             "processed_cases":
                 processed_cases,
@@ -716,14 +859,14 @@ def retrieve_similar_cases(
 
             "top_case_ids":
                 [
-                    r["case_id"]
-                    for r in top_results
+                    result["case_id"]
+                    for result in top_results
                 ],
 
             "top_scores":
                 [
-                    r["similarity"]
-                    for r in top_results
+                    result["similarity"]
+                    for result in top_results
                 ],
 
             "total_time_ms":

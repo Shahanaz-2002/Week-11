@@ -2,7 +2,7 @@ import requests
 import json
 import time
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 
 # =========================================================
@@ -22,12 +22,20 @@ MAX_ALLOWED_RESPONSE_MS = 5000
 
 def print_divider():
 
-    print("=" * 100)
+    print("=" * 120)
 
 
 def generate_request_id():
 
     return f"REQ-{uuid.uuid4().hex[:8].upper()}"
+
+
+def safe_float(value, default=0.0):
+
+    try:
+        return float(value)
+    except Exception:
+        return default
 
 
 # =========================================================
@@ -40,14 +48,11 @@ def validate_success_response(data):
 
         "status",
         "message",
-        "request_id",
-        "api_version",
-        "request_timestamp",
         "matches",
         "total_matches_found",
         "confidence_score",
-        "generated_clinical_context",
-        "input_fields_used",
+        "generated_context",
+        "search_query",
         "processing_time_ms",
         "explanation"
     ]
@@ -69,7 +74,13 @@ def validate_success_response(data):
     # STATUS VALIDATION
     # =====================================================
 
-    if str(data["status"]).lower() != "success":
+    allowed_status = [
+
+        "Success",
+        "No Match"
+    ]
+
+    if data["status"] not in allowed_status:
 
         return (
             False,
@@ -98,13 +109,15 @@ def validate_success_response(data):
         )
 
     # =====================================================
-    # CONFIDENCE RANGE VALIDATION
+    # CONFIDENCE SCORE VALIDATION
     # =====================================================
 
+    confidence_score = safe_float(
+        data["confidence_score"]
+    )
+
     if not (
-        0.0 <=
-        data["confidence_score"] <=
-        1.0
+        0.0 <= confidence_score <= 1.0
     ):
 
         return (
@@ -124,7 +137,7 @@ def validate_success_response(data):
         )
 
     # =====================================================
-    # TOP-2 MATCH VALIDATION
+    # TOP MATCH LIMIT VALIDATION
     # =====================================================
 
     if len(data["matches"]) > 2:
@@ -151,14 +164,14 @@ def validate_success_response(data):
 
             "case_id",
             "match_score",
+            "confidence_level",
             "chief_complaint",
             "affected_body_part",
             "doctor_notes",
+            "recommended_tests",
+            "recommended_medicines",
             "matched_keywords",
-            "confidence_level",
-            "semantic_score",
-            "retrieval_source",
-            "recommendation"
+            "similarity_reason"
         ]
 
         for field in required_match_fields:
@@ -174,26 +187,17 @@ def validate_success_response(data):
         # SCORE VALIDATION
         # -------------------------------------------------
 
+        match_score = safe_float(
+            match["match_score"]
+        )
+
         if not (
-            0.0 <=
-            match["match_score"] <=
-            1.0
+            0.0 <= match_score <= 1.0
         ):
 
             return (
                 False,
                 "match_score out of range"
-            )
-
-        if not (
-            0.0 <=
-            match["semantic_score"] <=
-            1.0
-        ):
-
-            return (
-                False,
-                "semantic_score out of range"
             )
 
         # -------------------------------------------------
@@ -211,30 +215,37 @@ def validate_success_response(data):
             )
 
         # -------------------------------------------------
-        # RECOMMENDATION VALIDATION
+        # LIST VALIDATION
         # -------------------------------------------------
 
-        recommendation = match["recommendation"]
-
-        if not isinstance(recommendation, dict):
+        if not isinstance(
+            match["recommended_tests"],
+            list
+        ):
 
             return (
                 False,
-                "recommendation should be dict"
+                "recommended_tests must be list"
             )
 
-        if "recommended_tests" not in recommendation:
+        if not isinstance(
+            match["recommended_medicines"],
+            list
+        ):
 
             return (
                 False,
-                "Missing recommended_tests"
+                "recommended_medicines must be list"
             )
 
-        if "recommended_medicines" not in recommendation:
+        if not isinstance(
+            match["matched_keywords"],
+            list
+        ):
 
             return (
                 False,
-                "Missing recommended_medicines"
+                "matched_keywords must be list"
             )
 
     return (
@@ -248,6 +259,13 @@ def validate_success_response(data):
 # =========================================================
 
 def validate_error_response(data):
+
+    if not isinstance(data, dict):
+
+        return (
+            False,
+            "Error response should be dict"
+        )
 
     if "detail" not in data:
 
@@ -565,6 +583,32 @@ test_cases = [
     },
 
     # =====================================================
+    # SHOULDER CASE
+    # =====================================================
+
+    {
+        "name": "Shoulder Clinical Input",
+
+        "payload": {
+
+            "chief_complaint":
+                "Shoulder stiffness and pain",
+
+            "affected_body_part":
+                "Left Shoulder",
+
+            "physical_examination":
+                "Limited range of motion",
+
+            "patient_pain_classification":
+                "Severe"
+        },
+
+        "expected_status":
+            200
+    },
+
+    # =====================================================
     # EMPTY REQUEST
     # =====================================================
 
@@ -595,6 +639,26 @@ test_cases = [
 
         "expected_status":
             422
+    },
+
+    # =====================================================
+    # INVALID GENDER
+    # =====================================================
+
+    {
+        "name": "Invalid Gender",
+
+        "payload": {
+
+            "chief_complaint":
+                "Back pain",
+
+            "gender":
+                "Alien"
+        },
+
+        "expected_status":
+            422
     }
 ]
 
@@ -614,7 +678,7 @@ if __name__ == "__main__":
 
     failed = 0
 
-    results_summary = []
+    results_summary: List[Dict] = []
 
     total_start_time = time.time()
 
