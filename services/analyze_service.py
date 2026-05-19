@@ -39,14 +39,18 @@ def build_search_query(request):
         request.objective_findings,
         request.patient_pain_classification,
         request.previous_injuries,
-        request.functional_assessment
+        request.functional_assessment,
+        request.doctor_notes,
+        request.clinical_history
     ]
 
     for field in weighted_fields:
 
-        if field not in [None, ""]:
+        if field not in [None, "", [], {}]:
 
-            query_parts.append(field)
+            query_parts.append(
+                str(field).strip()
+            )
 
     return " | ".join(query_parts).strip()
 
@@ -111,66 +115,104 @@ def generate_recommendations(case):
         case.get("chief_complaint", "")
     ).lower()
 
-    # -----------------------------------------------------
-    # KNEE RELATED
-    # -----------------------------------------------------
+    body_part = str(
+        case.get("affected_body_part", "")
+    ).lower()
 
-    if "knee" in complaint:
+    combined_text = (
+        complaint + " " + body_part
+    ).lower()
+
+    # =====================================================
+    # KNEE CONDITIONS
+    # =====================================================
+
+    if "knee" in combined_text:
 
         recommendations["recommended_tests"] = [
-            "X-Ray",
+
+            "Knee X-Ray",
             "MRI Knee",
             "Physical Stability Test"
         ]
 
         recommendations["recommended_medicines"] = [
+
             "Ibuprofen",
             "Paracetamol"
         ]
 
-    # -----------------------------------------------------
-    # BACK PAIN
-    # -----------------------------------------------------
+    # =====================================================
+    # BACK CONDITIONS
+    # =====================================================
 
-    elif "back" in complaint:
+    elif "back" in combined_text:
 
         recommendations["recommended_tests"] = [
+
             "Spine MRI",
             "Posture Assessment"
         ]
 
         recommendations["recommended_medicines"] = [
+
             "Diclofenac",
             "Muscle Relaxant"
         ]
 
-    # -----------------------------------------------------
-    # SHOULDER PAIN
-    # -----------------------------------------------------
+    # =====================================================
+    # SHOULDER CONDITIONS
+    # =====================================================
 
-    elif "shoulder" in complaint:
+    elif "shoulder" in combined_text:
 
         recommendations["recommended_tests"] = [
+
             "Shoulder MRI",
             "Rotator Cuff Examination"
         ]
 
         recommendations["recommended_medicines"] = [
+
             "Naproxen",
             "Pain Relief Gel"
         ]
 
-    # -----------------------------------------------------
+    # =====================================================
+    # SKIN / DERMATOLOGY
+    # =====================================================
+
+    elif (
+        "skin" in combined_text or
+        "rash" in combined_text or
+        "acne" in combined_text
+    ):
+
+        recommendations["recommended_tests"] = [
+
+            "Skin Examination",
+            "Allergy Test"
+        ]
+
+        recommendations["recommended_medicines"] = [
+
+            "Topical Cream",
+            "Antihistamine"
+        ]
+
+    # =====================================================
     # DEFAULT
-    # -----------------------------------------------------
+    # =====================================================
 
     else:
 
         recommendations["recommended_tests"] = [
+
             "Clinical Evaluation"
         ]
 
         recommendations["recommended_medicines"] = [
+
             "General Pain Management"
         ]
 
@@ -185,12 +227,60 @@ def generate_recommendations(case):
 def get_confidence_level(score):
 
     if score >= 0.85:
+
         return "High"
 
-    if score >= 0.60:
+    elif score >= 0.60:
+
         return "Moderate"
 
     return "Low"
+
+
+# =========================================================
+# HELPER FUNCTION:
+# GENERATE MATCH EXPLANATION
+# =========================================================
+
+def generate_similarity_reason(case):
+
+    keywords = []
+
+    complaint = case.get(
+        "chief_complaint",
+        ""
+    )
+
+    body_part = case.get(
+        "affected_body_part",
+        ""
+    )
+
+    findings = case.get(
+        "objective_findings",
+        ""
+    )
+
+    if complaint:
+        keywords.append(complaint)
+
+    if body_part:
+        keywords.append(body_part)
+
+    if findings:
+        keywords.append(findings)
+
+    if len(keywords) == 0:
+
+        return (
+            "Matched using semantic "
+            "clinical similarity"
+        )
+
+    return (
+        "Matched based on: " +
+        ", ".join(keywords[:3])
+    )
 
 
 # =========================================================
@@ -248,8 +338,16 @@ def clinical_match_pipeline(
         if not search_query.strip():
 
             raise HTTPException(
+
                 status_code=400,
-                detail="Clinical search query is empty"
+
+                detail={
+                    "error":
+                        "Invalid Input",
+
+                    "message":
+                        "Clinical search query is empty"
+                }
             )
 
         # =================================================
@@ -279,7 +377,7 @@ def clinical_match_pipeline(
 
                 case_database=case_database,
 
-                top_k=TOP_K
+                top_k=max(TOP_K, 2)
             )
 
         except Exception as e:
@@ -296,8 +394,16 @@ def clinical_match_pipeline(
                 )
 
             raise HTTPException(
+
                 status_code=500,
-                detail="Error during clinical similarity retrieval"
+
+                detail={
+                    "error":
+                        "Retrieval Failure",
+
+                    "message":
+                        "Error during clinical similarity retrieval"
+                }
             )
 
         # =================================================
@@ -308,22 +414,41 @@ def clinical_match_pipeline(
 
             return {
 
-                "status": "No Match",
+                "status":
+                    "No Match",
 
                 "message":
                     "No similar clinical cases found",
 
-                "matches": [],
+                "matches":
+                    [],
 
-                "total_matches_found": 0,
+                "total_matches_found":
+                    0,
 
-                "confidence_score": 0.0,
+                "confidence_score":
+                    0.0,
 
                 "generated_context":
                     generated_context,
 
+                "search_query":
+                    search_query,
+
+                "processing_time_ms":
+                    round(
+                        (
+                            time.time() -
+                            start_time
+                        ) * 1000,
+                        2
+                    ),
+
                 "explanation":
-                    "No relevant historical cases available"
+                    (
+                        "No relevant historical "
+                        "clinical cases available"
+                    )
             }
 
         # =================================================
@@ -343,13 +468,23 @@ def clinical_match_pipeline(
             try:
 
                 similarity_score = round(
+
                     float(
                         case.get(
                             "similarity",
                             0.0
                         )
                     ),
+
                     4
+                )
+
+                similarity_score = max(
+                    0.0,
+                    min(
+                        1.0,
+                        similarity_score
+                    )
                 )
 
                 recommendations = (
@@ -357,20 +492,6 @@ def clinical_match_pipeline(
                         case
                     )
                 )
-
-                matched_keywords = []
-
-                complaint = str(
-                    case.get(
-                        "chief_complaint",
-                        ""
-                    )
-                )
-
-                if complaint:
-                    matched_keywords.append(
-                        complaint
-                    )
 
                 formatted_case = {
 
@@ -383,12 +504,11 @@ def clinical_match_pipeline(
                         ),
 
                     "match_score":
-                        max(
-                            0.0,
-                            min(
-                                1.0,
-                                similarity_score
-                            )
+                        similarity_score,
+
+                    "confidence_level":
+                        get_confidence_level(
+                            similarity_score
                         ),
 
                     "chief_complaint":
@@ -416,29 +536,41 @@ def clinical_match_pipeline(
                         ),
 
                     "recommended_tests":
-                        recommendations[
-                            "recommended_tests"
-                        ],
-
-                    "recommended_medicines":
-                        recommendations[
-                            "recommended_medicines"
-                        ],
-
-                    "matched_keywords":
-                        matched_keywords,
-
-                    "confidence_level":
-                        get_confidence_level(
-                            similarity_score
+                        case.get(
+                            "recommended_tests",
+                            recommendations[
+                                "recommended_tests"
+                            ]
                         ),
 
-                    "explanation":
-                        (
-                            f"Matched based on "
-                            f"clinical similarity "
-                            f"with score "
-                            f"{similarity_score}"
+                    "recommended_medicines":
+                        case.get(
+                            "recommended_medicines",
+                            recommendations[
+                                "recommended_medicines"
+                            ]
+                        ),
+
+                    "matched_keywords": [
+
+                        str(
+                            case.get(
+                                "chief_complaint",
+                                ""
+                            )
+                        ),
+
+                        str(
+                            case.get(
+                                "affected_body_part",
+                                ""
+                            )
+                        )
+                    ],
+
+                    "similarity_reason":
+                        generate_similarity_reason(
+                            case
                         )
                 }
 
@@ -456,8 +588,16 @@ def clinical_match_pipeline(
         if len(formatted_matches) == 0:
 
             raise HTTPException(
+
                 status_code=500,
-                detail="Retrieved cases could not be formatted"
+
+                detail={
+                    "error":
+                        "Formatting Failure",
+
+                    "message":
+                        "Retrieved cases could not be formatted"
+                }
             )
 
         # =================================================
@@ -467,8 +607,11 @@ def clinical_match_pipeline(
         confidence_score = round(
 
             sum([
+
                 match["match_score"]
+
                 for match in formatted_matches
+
             ]) / len(formatted_matches),
 
             4
@@ -479,7 +622,12 @@ def clinical_match_pipeline(
         # =================================================
 
         total_time = round(
-            (time.time() - start_time) * 1000,
+
+            (
+                time.time() -
+                start_time
+            ) * 1000,
+
             2
         )
 
@@ -512,7 +660,10 @@ def clinical_match_pipeline(
                 "Success",
 
             "message":
-                "Clinical similarity matching completed successfully",
+                (
+                    "Top clinical matches "
+                    "retrieved successfully"
+                ),
 
             "matches":
                 formatted_matches,
@@ -526,14 +677,18 @@ def clinical_match_pipeline(
             "generated_context":
                 generated_context,
 
+            "search_query":
+                search_query,
+
+            "processing_time_ms":
+                total_time,
+
             "explanation":
                 (
                     "Top clinical matches generated "
-                    "using semantic similarity retrieval"
-                ),
-
-            "processing_time_ms":
-                total_time
+                    "using AI-powered semantic "
+                    "similarity retrieval"
+                )
         }
 
     # =====================================================
@@ -572,9 +727,11 @@ def clinical_match_pipeline(
                 "message":
                     "Clinical pipeline execution failed",
 
-                "matches": [],
+                "matches":
+                    [],
 
-                "confidence_score": 0.0,
+                "confidence_score":
+                    0.0,
 
                 "explanation":
                     str(e)

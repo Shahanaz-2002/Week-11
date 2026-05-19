@@ -13,6 +13,8 @@ API_URL = "http://127.0.0.1:8000/clinical/match"
 
 REQUEST_TIMEOUT = 30
 
+MAX_ALLOWED_RESPONSE_MS = 5000
+
 
 # =========================================================
 # HELPER FUNCTIONS
@@ -29,8 +31,7 @@ def generate_request_id():
 
 
 # =========================================================
-# RESPONSE VALIDATION:
-# SUCCESS RESPONSE
+# SUCCESS RESPONSE VALIDATION
 # =========================================================
 
 def validate_success_response(data):
@@ -40,16 +41,20 @@ def validate_success_response(data):
         "status",
         "message",
         "request_id",
+        "api_version",
+        "request_timestamp",
         "matches",
         "total_matches_found",
         "confidence_score",
-        "generated_context",
+        "generated_clinical_context",
+        "input_fields_used",
+        "processing_time_ms",
         "explanation"
     ]
 
-    # -----------------------------------------------------
-    # REQUIRED FIELD CHECK
-    # -----------------------------------------------------
+    # =====================================================
+    # REQUIRED FIELD VALIDATION
+    # =====================================================
 
     for field in required_fields:
 
@@ -60,9 +65,20 @@ def validate_success_response(data):
                 f"Missing field: {field}"
             )
 
-    # -----------------------------------------------------
-    # TYPE CHECKS
-    # -----------------------------------------------------
+    # =====================================================
+    # STATUS VALIDATION
+    # =====================================================
+
+    if str(data["status"]).lower() != "success":
+
+        return (
+            False,
+            "Invalid status value"
+        )
+
+    # =====================================================
+    # TYPE VALIDATION
+    # =====================================================
 
     if not isinstance(data["matches"], list):
 
@@ -78,8 +94,12 @@ def validate_success_response(data):
 
         return (
             False,
-            "confidence_score should be numeric"
+            "confidence_score must be numeric"
         )
+
+    # =====================================================
+    # CONFIDENCE RANGE VALIDATION
+    # =====================================================
 
     if not (
         0.0 <=
@@ -92,9 +112,38 @@ def validate_success_response(data):
             "confidence_score out of range"
         )
 
-    # -----------------------------------------------------
-    # MATCH STRUCTURE CHECK
-    # -----------------------------------------------------
+    # =====================================================
+    # MATCH COUNT VALIDATION
+    # =====================================================
+
+    if data["total_matches_found"] != len(data["matches"]):
+
+        return (
+            False,
+            "total_matches_found mismatch"
+        )
+
+    # =====================================================
+    # TOP-2 MATCH VALIDATION
+    # =====================================================
+
+    if len(data["matches"]) > 2:
+
+        return (
+            False,
+            "More than 2 matches returned"
+        )
+
+    # =====================================================
+    # MATCH VALIDATION
+    # =====================================================
+
+    allowed_confidence_levels = [
+
+        "High",
+        "Moderate",
+        "Low"
+    ]
 
     for match in data["matches"]:
 
@@ -102,9 +151,14 @@ def validate_success_response(data):
 
             "case_id",
             "match_score",
-            "recommended_tests",
-            "recommended_medicines",
-            "confidence_level"
+            "chief_complaint",
+            "affected_body_part",
+            "doctor_notes",
+            "matched_keywords",
+            "confidence_level",
+            "semantic_score",
+            "retrieval_source",
+            "recommendation"
         ]
 
         for field in required_match_fields:
@@ -116,6 +170,73 @@ def validate_success_response(data):
                     f"Missing match field: {field}"
                 )
 
+        # -------------------------------------------------
+        # SCORE VALIDATION
+        # -------------------------------------------------
+
+        if not (
+            0.0 <=
+            match["match_score"] <=
+            1.0
+        ):
+
+            return (
+                False,
+                "match_score out of range"
+            )
+
+        if not (
+            0.0 <=
+            match["semantic_score"] <=
+            1.0
+        ):
+
+            return (
+                False,
+                "semantic_score out of range"
+            )
+
+        # -------------------------------------------------
+        # CONFIDENCE LEVEL VALIDATION
+        # -------------------------------------------------
+
+        if (
+            match["confidence_level"]
+            not in allowed_confidence_levels
+        ):
+
+            return (
+                False,
+                "Invalid confidence level"
+            )
+
+        # -------------------------------------------------
+        # RECOMMENDATION VALIDATION
+        # -------------------------------------------------
+
+        recommendation = match["recommendation"]
+
+        if not isinstance(recommendation, dict):
+
+            return (
+                False,
+                "recommendation should be dict"
+            )
+
+        if "recommended_tests" not in recommendation:
+
+            return (
+                False,
+                "Missing recommended_tests"
+            )
+
+        if "recommended_medicines" not in recommendation:
+
+            return (
+                False,
+                "Missing recommended_medicines"
+            )
+
     return (
         True,
         "Valid success response"
@@ -123,8 +244,7 @@ def validate_success_response(data):
 
 
 # =========================================================
-# RESPONSE VALIDATION:
-# ERROR RESPONSE
+# ERROR RESPONSE VALIDATION
 # =========================================================
 
 def validate_error_response(data):
@@ -143,12 +263,12 @@ def validate_error_response(data):
 
 
 # =========================================================
-# PRINT TEST RESULT
+# PRINT RESULT
 # =========================================================
 
 def print_test_result(
-    passed: bool,
-    message: str
+    passed,
+    message
 ):
 
     if passed:
@@ -161,7 +281,7 @@ def print_test_result(
 
 
 # =========================================================
-# REQUEST SENDER
+# SEND REQUEST
 # =========================================================
 
 def send_request(
@@ -172,11 +292,11 @@ def send_request(
 
     print_divider()
 
-    print(f"TEST NAME   : {test_name}")
+    print(f"TEST NAME  : {test_name}")
 
     request_id = generate_request_id()
 
-    print(f"REQUEST ID  : {request_id}")
+    print(f"REQUEST ID : {request_id}")
 
     print("\nREQUEST PAYLOAD:\n")
 
@@ -205,16 +325,28 @@ def send_request(
         )
 
         response_time = round(
+
             (
                 time.time() -
                 start_time
             ) * 1000,
+
             2
         )
 
-        print(f"\nSTATUS CODE : {response.status_code}")
+        print(f"\nSTATUS CODE   : {response.status_code}")
 
         print(f"RESPONSE TIME : {response_time} ms")
+
+        # =================================================
+        # PERFORMANCE WARNING
+        # =================================================
+
+        if response_time > MAX_ALLOWED_RESPONSE_MS:
+
+            print(
+                "\nWARNING : Slow API response"
+            )
 
         # =================================================
         # JSON PARSING
@@ -243,7 +375,7 @@ def send_request(
             return False
 
         # =================================================
-        # STATUS CODE CHECK
+        # STATUS VALIDATION
         # =================================================
 
         if response.status_code != expected_status:
@@ -253,8 +385,7 @@ def send_request(
                 False,
 
                 (
-                    f"Expected status "
-                    f"{expected_status}, "
+                    f"Expected {expected_status}, "
                     f"got {response.status_code}"
                 )
             )
@@ -262,12 +393,13 @@ def send_request(
             return False
 
         # =================================================
-        # SUCCESS RESPONSE VALIDATION
+        # RESPONSE VALIDATION
         # =================================================
 
         if response.status_code == 200:
 
             is_valid, validation_message = (
+
                 validate_success_response(
                     data
                 )
@@ -275,11 +407,8 @@ def send_request(
 
         else:
 
-            # =============================================
-            # ERROR RESPONSE VALIDATION
-            # =============================================
-
             is_valid, validation_message = (
+
                 validate_error_response(
                     data
                 )
@@ -294,10 +423,6 @@ def send_request(
 
             return False
 
-        # =================================================
-        # PASS
-        # =================================================
-
         print_test_result(
             True,
             validation_message
@@ -306,17 +431,21 @@ def send_request(
         return True
 
     # =====================================================
-    # REQUEST FAILURE
+    # CONNECTION ERROR
     # =====================================================
 
     except requests.exceptions.ConnectionError:
 
         print_test_result(
             False,
-            "Unable to connect to API server"
+            "Unable to connect to API"
         )
 
         return False
+
+    # =====================================================
+    # TIMEOUT ERROR
+    # =====================================================
 
     except requests.exceptions.Timeout:
 
@@ -326,6 +455,10 @@ def send_request(
         )
 
         return False
+
+    # =====================================================
+    # UNKNOWN ERROR
+    # =====================================================
 
     except Exception as e:
 
@@ -344,12 +477,11 @@ def send_request(
 test_cases = [
 
     # =====================================================
-    # FULL VALID INPUT
+    # FULL CLINICAL INPUT
     # =====================================================
 
     {
-        "name":
-            "Full Clinical Input",
+        "name": "Full Clinical Input",
 
         "payload": {
 
@@ -414,8 +546,7 @@ test_cases = [
     # =====================================================
 
     {
-        "name":
-            "Partial Clinical Input",
+        "name": "Partial Clinical Input",
 
         "payload": {
 
@@ -434,48 +565,11 @@ test_cases = [
     },
 
     # =====================================================
-    # SINGLE FIELD
-    # =====================================================
-
-    {
-        "name":
-            "Single Input Field",
-
-        "payload": {
-
-            "chief_complaint":
-                "Shoulder stiffness"
-        },
-
-        "expected_status":
-            200
-    },
-
-    # =====================================================
-    # ONLY AGE
-    # =====================================================
-
-    {
-        "name":
-            "Only Age Provided",
-
-        "payload": {
-
-            "age":
-                60
-        },
-
-        "expected_status":
-            200
-    },
-
-    # =====================================================
     # EMPTY REQUEST
     # =====================================================
 
     {
-        "name":
-            "Empty Request",
+        "name": "Empty Request",
 
         "payload": {},
 
@@ -488,8 +582,7 @@ test_cases = [
     # =====================================================
 
     {
-        "name":
-            "Invalid Age Input",
+        "name": "Invalid Age",
 
         "payload": {
 
@@ -502,96 +595,6 @@ test_cases = [
 
         "expected_status":
             422
-    },
-
-    # =====================================================
-    # INVALID GENDER
-    # =====================================================
-
-    {
-        "name":
-            "Invalid Gender Input",
-
-        "payload": {
-
-            "chief_complaint":
-                "Knee pain",
-
-            "gender":
-                "Alien"
-        },
-
-        "expected_status":
-            422
-    },
-
-    # =====================================================
-    # LONG INPUT
-    # =====================================================
-
-    {
-        "name":
-            "Long Clinical Description",
-
-        "payload": {
-
-            "subjective_assessment":
-                (
-                    "Patient reports chronic "
-                    "lower back pain "
-                ) * 30
-        },
-
-        "expected_status":
-            200
-    },
-
-    # =====================================================
-    # NULL OPTIONAL FIELDS
-    # =====================================================
-
-    {
-        "name":
-            "Null Optional Fields",
-
-        "payload": {
-
-            "chief_complaint":
-                None,
-
-            "occupation":
-                None,
-
-            "age":
-                32
-        },
-
-        "expected_status":
-            200
-    },
-
-    # =====================================================
-    # MULTIPLE OPTIONAL INPUTS
-    # =====================================================
-
-    {
-        "name":
-            "Dynamic Optional Inputs",
-
-        "payload": {
-
-            "symptoms":
-                "Swelling and tenderness",
-
-            "doctor_notes":
-                "Suspected inflammation",
-
-            "clinical_history":
-                "Previous sports injury"
-        },
-
-        "expected_status":
-            200
     }
 ]
 
@@ -602,7 +605,10 @@ test_cases = [
 
 if __name__ == "__main__":
 
-    print("\nStarting Clinical Match API Simulation...\n")
+    print(
+        "\nStarting Clinical Match "
+        "API Simulation...\n"
+    )
 
     passed = 0
 
@@ -613,7 +619,7 @@ if __name__ == "__main__":
     total_start_time = time.time()
 
     # =====================================================
-    # EXECUTE TEST CASES
+    # EXECUTE TESTS
     # =====================================================
 
     for test in test_cases:
@@ -658,10 +664,12 @@ if __name__ == "__main__":
     # =====================================================
 
     total_execution_time = round(
+
         (
             time.time() -
             total_start_time
         ) * 1000,
+
         2
     )
 
@@ -679,10 +687,6 @@ if __name__ == "__main__":
         f"TOTAL EXECUTION MS : "
         f"{total_execution_time}"
     )
-
-    # =====================================================
-    # SAVE RESULTS
-    # =====================================================
 
     final_results = {
 

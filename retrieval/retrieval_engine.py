@@ -18,9 +18,17 @@ try:
 
     embedder = BioBERTEmbedding()
 
-except Exception:
+except Exception as e:
 
     embedder = None
+
+    logger.error(
+        json.dumps({
+            "event": "embedder_initialization_failed",
+            "error": str(e),
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        })
+    )
 
 
 # =========================================================
@@ -52,7 +60,7 @@ def log_event(event_type, message, extra=None):
 
 def clean_text(text):
 
-    if not text:
+    if text is None:
         return ""
 
     text = str(text)
@@ -87,7 +95,12 @@ def enhance_query(query_text):
         "tenderness",
         "sprain",
         "posture",
-        "movement"
+        "movement",
+        "arthritis",
+        "back",
+        "knee",
+        "shoulder",
+        "neck"
     ]
 
     detected_keywords = []
@@ -99,6 +112,8 @@ def enhance_query(query_text):
         if keyword in lower_query:
 
             detected_keywords.append(keyword)
+
+    detected_keywords = list(set(detected_keywords))
 
     if detected_keywords:
 
@@ -133,7 +148,14 @@ def cosine_similarity(
             norm_a * norm_b
         )
 
-        return float(similarity)
+        similarity = float(similarity)
+
+        similarity = max(
+            0.0,
+            min(similarity, 1.0)
+        )
+
+        return similarity
 
     except Exception as e:
 
@@ -161,11 +183,14 @@ def build_case_search_text(case_data):
         "chief_complaint",
         "affected_body_part",
         "symptoms",
+        "subjective_assessment",
         "physical_examination",
         "objective_findings",
         "doctor_notes",
         "clinical_history",
-        "case_description"
+        "case_description",
+        "previous_injuries",
+        "symptoms_duration"
     ]
 
     for field in fields:
@@ -175,7 +200,7 @@ def build_case_search_text(case_data):
         if value not in [None, ""]:
 
             text_parts.append(
-                str(value)
+                clean_text(value)
             )
 
     return " | ".join(text_parts)
@@ -205,10 +230,15 @@ def extract_matched_keywords(
     )
 
     matched = [
-        word
+
+        word.strip(".,!?;:()[]{}")
+
         for word in matched
+
         if len(word) > 3
     ]
+
+    matched = list(set(matched))
 
     return matched[:10]
 
@@ -230,6 +260,35 @@ def apply_keyword_boost(
     boosted_score = similarity_score + boost
 
     return min(boosted_score, 1.0)
+
+
+# =========================================================
+# GENERATE CONFIDENCE LEVEL
+# =========================================================
+
+def get_confidence_level(score):
+
+    if score >= 0.85:
+        return "High"
+
+    if score >= 0.60:
+        return "Moderate"
+
+    return "Low"
+
+
+# =========================================================
+# SAFE CASE FIELD ACCESS
+# =========================================================
+
+def safe_case_value(case_data, field, default="Unknown"):
+
+    value = case_data.get(field, default)
+
+    if value in [None, ""]:
+        return default
+
+    return value
 
 
 # =========================================================
@@ -308,6 +367,10 @@ def retrieve_similar_cases(
 
         return []
 
+    if not isinstance(top_k, int) or top_k <= 0:
+
+        top_k = 2
+
     # =====================================================
     # QUERY ENHANCEMENT
     # =====================================================
@@ -354,6 +417,11 @@ def retrieve_similar_cases(
 
         if query_embedding is None:
 
+            log_event(
+                "embedding_failure",
+                "Query embedding returned None"
+            )
+
             return []
 
         query_embedding = np.array(
@@ -361,6 +429,11 @@ def retrieve_similar_cases(
         )
 
         if query_embedding.size == 0:
+
+            log_event(
+                "embedding_failure",
+                "Empty query embedding generated"
+            )
 
             return []
 
@@ -404,10 +477,13 @@ def retrieve_similar_cases(
 
     processed_cases = 0
 
+    skipped_cases = 0
+
     for case_data in case_database:
 
         if not isinstance(case_data, dict):
 
+            skipped_cases += 1
             continue
 
         try:
@@ -425,6 +501,7 @@ def retrieve_similar_cases(
 
             if case_embedding.size == 0:
 
+                skipped_cases += 1
                 continue
 
             # ------------------------------------------------
@@ -433,6 +510,7 @@ def retrieve_similar_cases(
 
             if len(query_embedding) != len(case_embedding):
 
+                skipped_cases += 1
                 continue
 
             # ------------------------------------------------
@@ -486,12 +564,12 @@ def retrieve_similar_cases(
             # RESULT OBJECT
             # ------------------------------------------------
 
-            results.append({
+            result_object = {
 
                 "case_id":
-                    case_data.get(
-                        "case_id",
-                        "Unknown"
+                    safe_case_value(
+                        case_data,
+                        "case_id"
                     ),
 
                 "similarity":
@@ -501,41 +579,62 @@ def retrieve_similar_cases(
                     ),
 
                 "chief_complaint":
-                    case_data.get(
-                        "chief_complaint",
-                        "Unknown"
+                    safe_case_value(
+                        case_data,
+                        "chief_complaint"
                     ),
 
                 "affected_body_part":
-                    case_data.get(
-                        "affected_body_part",
-                        "Unknown"
+                    safe_case_value(
+                        case_data,
+                        "affected_body_part"
                     ),
 
                 "symptoms_duration":
-                    case_data.get(
-                        "symptoms_duration",
-                        "Unknown"
+                    safe_case_value(
+                        case_data,
+                        "symptoms_duration"
                     ),
 
                 "doctor_notes":
-                    case_data.get(
+                    safe_case_value(
+                        case_data,
                         "doctor_notes",
                         "No notes available"
                     ),
 
                 "clinical_history":
-                    case_data.get(
+                    safe_case_value(
+                        case_data,
                         "clinical_history",
                         ""
+                    ),
+
+                "recommended_tests":
+                    case_data.get(
+                        "recommended_tests",
+                        []
+                    ),
+
+                "recommended_medicines":
+                    case_data.get(
+                        "recommended_medicines",
+                        []
                     ),
 
                 "matched_keywords":
                     matched_keywords,
 
+                "confidence_level":
+                    get_confidence_level(
+                        boosted_score
+                    ),
+
                 "searchable_text":
                     searchable_text
-            })
+            }
+
+            results.append(result_object)
 
             processed_cases += 1
 
@@ -608,6 +707,9 @@ def retrieve_similar_cases(
         {
             "processed_cases":
                 processed_cases,
+
+            "skipped_cases":
+                skipped_cases,
 
             "returned_cases":
                 len(top_results),

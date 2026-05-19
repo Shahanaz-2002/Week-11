@@ -2,7 +2,8 @@ from pydantic import (
     BaseModel,
     Field,
     field_validator,
-    model_validator
+    model_validator,
+    ConfigDict
 )
 
 from typing import (
@@ -13,6 +14,46 @@ from typing import (
 )
 
 import re
+from datetime import datetime
+
+
+# =========================================================
+# TEXT CLEANER
+# =========================================================
+
+def clean_text(value):
+
+    if value is None:
+        return ""
+
+    value = str(value)
+
+    value = value.strip()
+
+    value = re.sub(r"\s+", " ", value)
+
+    value = re.sub(r"[^\w\s.,\-:/()]", "", value)
+
+    return value
+
+
+# =========================================================
+# PATIENT METADATA MODEL
+# =========================================================
+
+class PatientMetadata(BaseModel):
+
+    age: Optional[int] = None
+
+    gender: Optional[str] = ""
+
+    occupation: Optional[str] = ""
+
+    activity_levels: Optional[str] = ""
+
+    doctor_name: Optional[str] = ""
+
+    model_config = ConfigDict(extra="ignore")
 
 
 # =========================================================
@@ -22,184 +63,86 @@ import re
 class ClinicalMatchRequest(BaseModel):
 
     # -----------------------------------------------------
-    # BASIC PATIENT DETAILS
+    # BASIC DETAILS
     # -----------------------------------------------------
 
-    chief_complaint: Optional[str] = Field(
-        default="",
-        description="Primary complaint reported by the patient"
-    )
+    chief_complaint: Optional[str] = ""
 
-    affected_body_part: Optional[str] = Field(
-        default="",
-        description="Affected body part or region"
-    )
+    affected_body_part: Optional[str] = ""
 
-    symptoms_duration: Optional[str] = Field(
-        default="",
-        description="Duration of symptoms"
-    )
+    symptoms_duration: Optional[str] = ""
 
-    previous_injuries: Optional[str] = Field(
-        default="",
-        description="Any previous injuries or trauma history"
-    )
+    previous_injuries: Optional[str] = ""
 
-    current_medications: Optional[str] = Field(
-        default="",
-        description="Current medications being used"
-    )
+    current_medications: Optional[str] = ""
 
-    allergies: Optional[str] = Field(
-        default="",
-        description="Known allergies"
-    )
+    allergies: Optional[str] = ""
 
-    occupation: Optional[str] = Field(
-        default="",
-        description="Patient occupation"
-    )
+    occupation: Optional[str] = ""
 
-    activity_levels: Optional[str] = Field(
-        default="",
-        description="Daily activity level"
-    )
+    activity_levels: Optional[str] = ""
 
-    gender: Optional[str] = Field(
-        default="",
-        description="Gender of the patient"
-    )
+    gender: Optional[str] = ""
 
     age: Optional[int] = Field(
         default=None,
         ge=0,
-        le=120,
-        description="Age of the patient"
+        le=120
     )
 
-    doctor_name: Optional[str] = Field(
-        default="",
-        description="Doctor or clinician name"
-    )
+    doctor_name: Optional[str] = ""
 
     # -----------------------------------------------------
-    # CLINICAL ASSESSMENTS
+    # CLINICAL DETAILS
     # -----------------------------------------------------
 
-    subjective_assessment: Optional[str] = Field(
-        default="",
-        description="Subjective assessment provided by clinician"
-    )
+    subjective_assessment: Optional[str] = ""
 
-    functional_assessment: Optional[str] = Field(
-        default="",
-        description="Functional assessment details"
-    )
+    functional_assessment: Optional[str] = ""
 
-    physical_examination: Optional[str] = Field(
-        default="",
-        description="Physical examination findings"
-    )
+    physical_examination: Optional[str] = ""
 
-    objective_findings: Optional[str] = Field(
-        default="",
-        description="Objective or additional findings"
-    )
+    objective_findings: Optional[str] = ""
 
-    patient_pain_classification: Optional[str] = Field(
-        default="",
-        description="Pain severity or classification"
-    )
+    patient_pain_classification: Optional[str] = ""
 
-    # -----------------------------------------------------
-    # ADDITIONAL OPTIONAL INPUTS
-    # -----------------------------------------------------
+    symptoms: Optional[str] = ""
 
-    symptoms: Optional[str] = Field(
-        default="",
-        description="Additional symptoms"
-    )
+    doctor_notes: Optional[str] = ""
 
-    doctor_notes: Optional[str] = Field(
-        default="",
-        description="Doctor notes or comments"
-    )
+    clinical_history: Optional[str] = ""
 
-    clinical_history: Optional[str] = Field(
-        default="",
-        description="Clinical history of patient"
-    )
+    model_config = ConfigDict(extra="ignore")
 
-    # -----------------------------------------------------
-    # FIELD VALIDATORS
-    # -----------------------------------------------------
+    # =====================================================
+    # FIELD CLEANING
+    # =====================================================
 
     @field_validator(
-        "chief_complaint",
-        "affected_body_part",
-        "symptoms_duration",
-        "previous_injuries",
-        "current_medications",
-        "allergies",
-        "occupation",
-        "activity_levels",
-        "gender",
-        "doctor_name",
-        "subjective_assessment",
-        "functional_assessment",
-        "physical_examination",
-        "objective_findings",
-        "patient_pain_classification",
-        "symptoms",
-        "doctor_notes",
-        "clinical_history",
+        "*",
         mode="before"
     )
     @classmethod
-    def clean_optional_fields(cls, v):
+    def clean_fields(cls, value):
 
-        if v is None:
-            return ""
+        if isinstance(value, str):
 
-        # Convert to string
-        value = str(v)
+            value = clean_text(value)
 
-        # Remove leading/trailing spaces
-        value = value.strip()
-
-        # Remove multiple spaces
-        value = re.sub(r"\s+", " ", value)
+            if len(value) > 1000:
+                value = value[:1000]
 
         return value
 
-    # -----------------------------------------------------
-    # AGE VALIDATION
-    # -----------------------------------------------------
-
-    @field_validator("age")
-    @classmethod
-    def validate_age(cls, v):
-
-        if v is None:
-            return v
-
-        if v < 0 or v > 120:
-
-            raise ValueError(
-                "Age must be between 0 and 120"
-            )
-
-        return v
-
-    # -----------------------------------------------------
+    # =====================================================
     # GENDER VALIDATION
-    # -----------------------------------------------------
+    # =====================================================
 
     @field_validator("gender")
     @classmethod
-    def validate_gender(cls, v):
+    def validate_gender(cls, value):
 
-        if not v:
+        if not value:
             return ""
 
         allowed = [
@@ -209,65 +152,48 @@ class ClinicalMatchRequest(BaseModel):
             "prefer not to say"
         ]
 
-        if v.lower() not in allowed:
+        if value.lower() not in allowed:
 
             raise ValueError(
-                "Gender must be Male, Female, Other, or Prefer not to say"
+                "Invalid gender value"
             )
 
-        return v.title()
+        return value.title()
 
-    # -----------------------------------------------------
-    # AT LEAST ONE FIELD VALIDATION
-    # -----------------------------------------------------
+    # =====================================================
+    # AT LEAST ONE FIELD
+    # =====================================================
 
     @model_validator(mode="after")
-    def validate_at_least_one_field(self):
+    def validate_input(self):
 
         values = self.model_dump()
 
-        non_empty_fields = [
-            value
-            for value in values.values()
-            if value not in [None, "", [], {}]
+        non_empty = [
+
+            v for v in values.values()
+
+            if v not in [None, "", [], {}]
         ]
 
-        if len(non_empty_fields) == 0:
+        if len(non_empty) == 0:
 
             raise ValueError(
-                "At least one clinical input field is required"
+                "At least one clinical field is required"
             )
 
         return self
 
-    # -----------------------------------------------------
-    # AVAILABLE INPUT FIELDS
-    # -----------------------------------------------------
+    # =====================================================
+    # QUERY GENERATION
+    # =====================================================
 
-    def get_available_fields(self) -> List[str]:
+    def build_search_query(self):
 
-        available_fields = []
+        fields = [
 
-        for field_name, value in self.model_dump().items():
-
-            if value not in [None, "", [], {}]:
-
-                available_fields.append(field_name)
-
-        return available_fields
-
-    # -----------------------------------------------------
-    # SEARCH QUERY GENERATION
-    # -----------------------------------------------------
-
-    def build_search_query(self) -> str:
-
-        components = []
-
-        weighted_inputs = [
             self.chief_complaint,
             self.affected_body_part,
-            self.symptoms_duration,
             self.symptoms,
             self.subjective_assessment,
             self.physical_examination,
@@ -276,113 +202,67 @@ class ClinicalMatchRequest(BaseModel):
             self.previous_injuries
         ]
 
-        for item in weighted_inputs:
+        return " | ".join([
+            x for x in fields
+            if x not in [None, ""]
+        ])
 
-            if item not in [None, ""]:
-
-                components.append(item)
-
-        return " | ".join(components).strip()
-
-    # -----------------------------------------------------
+    # =====================================================
     # CONTEXT GENERATION
-    # -----------------------------------------------------
+    # =====================================================
 
-    def build_context(self) -> str:
+    def build_context(self):
 
-        context_parts = []
+        context = []
 
         field_map = {
+
             "Age": self.age,
             "Gender": self.gender,
             "Occupation": self.occupation,
-            "Activity Levels": self.activity_levels,
             "Chief Complaint": self.chief_complaint,
-            "Affected Body Part": self.affected_body_part,
             "Symptoms Duration": self.symptoms_duration,
-            "Previous Injuries": self.previous_injuries,
-            "Current Medications": self.current_medications,
-            "Allergies": self.allergies,
             "Subjective Assessment": self.subjective_assessment,
-            "Functional Assessment": self.functional_assessment,
             "Physical Examination": self.physical_examination,
             "Objective Findings": self.objective_findings,
-            "Pain Classification": self.patient_pain_classification,
-            "Symptoms": self.symptoms,
-            "Doctor Notes": self.doctor_notes,
-            "Clinical History": self.clinical_history,
-            "Doctor Name": self.doctor_name
+            "Clinical History": self.clinical_history
         }
 
-        for field_name, value in field_map.items():
+        for key, value in field_map.items():
 
-            if value not in [None, "", [], {}]:
+            if value not in [None, ""]:
 
-                context_parts.append(
-                    f"{field_name}: {value}"
+                context.append(
+                    f"{key}: {value}"
                 )
 
-        return "\n".join(context_parts)
+        return "\n".join(context)
 
-    # -----------------------------------------------------
-    # COMBINED SYMPTOMS
-    # -----------------------------------------------------
+    # =====================================================
+    # AVAILABLE FIELDS
+    # =====================================================
 
-    def build_combined_symptoms(self) -> str:
+    def get_available_fields(self):
 
-        symptoms = [
-            self.chief_complaint,
-            self.subjective_assessment,
-            self.objective_findings,
-            self.physical_examination,
-            self.symptoms
+        return [
+
+            k for k, v in self.model_dump().items()
+
+            if v not in [None, "", [], {}]
         ]
 
-        combined = " ".join([
-            item
-            for item in symptoms
-            if item not in [None, ""]
-        ])
 
-        return combined.strip()
+# =========================================================
+# RECOMMENDATION MODEL
+# =========================================================
 
-    # -----------------------------------------------------
-    # PATIENT METADATA
-    # -----------------------------------------------------
+class RecommendationModel(BaseModel):
 
-    def build_patient_metadata(self) -> Dict[str, Any]:
+    recommended_tests: List[str] = []
 
-        return {
-            "age": self.age,
-            "gender": self.gender,
-            "occupation": self.occupation,
-            "activity_levels": self.activity_levels,
-            "doctor_name": self.doctor_name
-        }
+    recommended_medicines: List[str] = []
 
-    # -----------------------------------------------------
-    # COMPLETE DYNAMIC INPUT GENERATION
-    # -----------------------------------------------------
-
-    def generate_dynamic_inputs(self) -> Dict[str, Any]:
-
-        return {
-
-            "search_query":
-                self.build_search_query(),
-
-            "generated_context":
-                self.build_context(),
-
-            "combined_symptoms":
-                self.build_combined_symptoms(),
-
-            "patient_metadata":
-                self.build_patient_metadata(),
-
-            "available_fields":
-                self.get_available_fields()
-        }
+    model_config = ConfigDict(extra="ignore")
 
 
 # =========================================================
@@ -391,63 +271,56 @@ class ClinicalMatchRequest(BaseModel):
 
 class MatchResult(BaseModel):
 
-    case_id: str = Field(
-        ...,
-        min_length=1,
-        description="Unique matched case identifier"
-    )
+    case_id: str
 
     match_score: float = Field(
-        ...,
         ge=0.0,
-        le=1.0,
-        description="Similarity score between 0 and 1"
+        le=1.0
     )
 
-    chief_complaint: str = Field(
-        default="Unknown",
-        description="Chief complaint of matched patient"
+    chief_complaint: str = "Unknown"
+
+    affected_body_part: str = "Unknown"
+
+    symptoms_duration: str = "Unknown"
+
+    doctor_notes: str = "No notes available"
+
+    explanation: str = (
+        "Match generated using semantic similarity"
     )
 
-    affected_body_part: str = Field(
-        default="Unknown",
-        description="Affected body part of matched patient"
-    )
+    matched_keywords: List[str] = []
 
-    symptoms_duration: str = Field(
-        default="Unknown",
-        description="Symptoms duration"
-    )
+    confidence_level: str = "Moderate"
 
-    doctor_notes: str = Field(
-        default="No notes available",
-        description="Doctor or clinician notes"
-    )
+    semantic_score: float = 0.0
 
-    explanation: str = Field(
-        default="Match generated using clinical similarity search",
-        description="Explanation for similarity match"
-    )
+    retrieval_source: str = "BioBERT Semantic Search"
 
-    recommended_tests: List[str] = Field(
-        default_factory=list,
-        description="Recommended diagnostic tests"
-    )
+    recommendation: RecommendationModel
 
-    recommended_medicines: List[str] = Field(
-        default_factory=list,
-        description="Recommended medicines"
-    )
+    model_config = ConfigDict(extra="ignore")
 
-    matched_keywords: List[str] = Field(
-        default_factory=list,
-        description="Keywords contributing to the match"
-    )
+    # =====================================================
+    # CONFIDENCE VALIDATION
+    # =====================================================
 
-    confidence_level: str = Field(
-        default="Moderate",
-        description="Confidence level of prediction"
-    )
+    @field_validator("confidence_level")
+    @classmethod
+    def validate_confidence(cls, value):
+
+        allowed = [
+            "High",
+            "Moderate",
+            "Low"
+        ]
+
+        if value not in allowed:
+
+            return "Moderate"
+
+        return value
 
 
 # =========================================================
@@ -456,59 +329,36 @@ class MatchResult(BaseModel):
 
 class ClinicalMatchResponse(BaseModel):
 
-    status: str = Field(
-        ...,
-        description="API response status"
+    status: str
+
+    message: str
+
+    request_id: str
+
+    api_version: str = "1.0.0"
+
+    request_timestamp: str = Field(
+        default_factory=lambda:
+        datetime.utcnow().isoformat()
     )
 
-    message: str = Field(
-        ...,
-        description="Response message"
-    )
+    matches: List[MatchResult] = []
 
-    request_id: str = Field(
-        ...,
-        description="Unique request identifier"
-    )
-
-    matches: List[MatchResult] = Field(
-        default_factory=list,
-        description="Top matched clinical cases"
-    )
-
-    total_matches_found: int = Field(
-        default=0,
-        description="Number of matches returned"
-    )
+    total_matches_found: int = 0
 
     confidence_score: float = Field(
-        ...,
         ge=0.0,
-        le=1.0,
-        description="Overall confidence score"
+        le=1.0
     )
 
-    search_query: str = Field(
-        default="",
-        description="Generated search query"
-    )
+    search_query: str = ""
 
-    generated_context: str = Field(
-        default="",
-        description="Dynamically generated clinical context"
-    )
+    generated_clinical_context: str = ""
 
-    input_fields_used: List[str] = Field(
-        default_factory=list,
-        description="Clinical fields used for matching"
-    )
+    input_fields_used: List[str] = []
 
-    processing_time_ms: float = Field(
-        default=0.0,
-        description="API response processing time in milliseconds"
-    )
+    processing_time_ms: float = 0.0
 
-    explanation: str = Field(
-        default="Clinical similarity matching completed successfully",
-        description="Explanation of how the result was generated"
-    )
+    explanation: str = ""
+
+    model_config = ConfigDict(extra="ignore")

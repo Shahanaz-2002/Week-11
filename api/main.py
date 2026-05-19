@@ -30,7 +30,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def log_event(event_type, request_id, message, extra=None):
+# =========================================================
+# LOG EVENT FUNCTION
+# =========================================================
+
+def log_event(
+    event_type,
+    request_id,
+    message,
+    extra=None
+):
 
     log_data = {
         "event": event_type,
@@ -51,17 +60,16 @@ def log_event(event_type, request_id, message, extra=None):
 
 app = FastAPI(
     title="Clinical Match API",
-    version="3.0.0",
+    version="4.0.0",
     description="""
     AI-powered Clinical Similarity Matching API
 
     Features:
     - Dynamic Clinical Input Processing
-    - Optional Field Handling
-    - Search Query Generation
-    - Clinical Context Generation
-    - Similar Patient Case Retrieval
-    - Top 2 Clinical Match Recommendation
+    - Semantic Clinical Retrieval
+    - Top-2 Similar Patient Matching
+    - Recommendation Generation
+    - Confidence Score Analysis
     """
 )
 
@@ -75,7 +83,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*"]
 )
 
 
@@ -87,10 +95,10 @@ app.add_middleware(
 def root():
 
     return {
-        "message": "Welcome to Clinical Match API",
-        "version": "3.0.0",
+        "message": "Clinical Match API Running",
+        "version": "4.0.0",
         "docs": "/docs",
-        "status": "running"
+        "status": "active"
     }
 
 
@@ -102,73 +110,46 @@ def root():
 def health_check():
 
     return {
-        "status": "Clinical Match API is running"
+        "status": "healthy",
+        "api": "Clinical Match API"
     }
 
 
 # =========================================================
-# MAIN CLINICAL MATCH ROUTE
+# MAIN CLINICAL MATCH ENDPOINT
 # =========================================================
 
 @app.post(
     "/clinical/match",
     response_model=ClinicalMatchResponse
 )
-def clinical_match(request: ClinicalMatchRequest):
-
-    # -----------------------------------------------------
-    # REQUEST ID
-    # -----------------------------------------------------
+def clinical_match(
+    request: ClinicalMatchRequest
+):
 
     request_id = str(uuid.uuid4())
 
     start_time = time.time()
 
-    # -----------------------------------------------------
-    # LOG INCOMING REQUEST
-    # -----------------------------------------------------
+    # =====================================================
+    # LOG REQUEST
+    # =====================================================
 
     log_event(
         "request_received",
         request_id,
-        "Incoming clinical request"
+        "Clinical request received"
     )
 
     try:
 
         # =================================================
-        # REQUEST VALIDATION
+        # PROCESS DYNAMIC INPUTS
         # =================================================
 
-        request_data = request.model_dump()
-
-        non_empty_fields = [
-            value
-            for value in request_data.values()
-            if value not in [None, "", [], {}]
-        ]
-
-        if len(non_empty_fields) == 0:
-
-            log_event(
-                "validation_error",
-                request_id,
-                "Empty clinical request received"
-            )
-
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "Invalid Input",
-                    "message": "At least one clinical field is required"
-                }
-            )
-
-        # =================================================
-        # DYNAMIC INPUT PROCESSING
-        # =================================================
-
-        processed_inputs = request.generate_dynamic_inputs()
+        processed_inputs = (
+            request.generate_dynamic_inputs()
+        )
 
         search_query = processed_inputs.get(
             "search_query",
@@ -195,12 +176,23 @@ def clinical_match(request: ClinicalMatchRequest):
             []
         )
 
-        # -------------------------------------------------
-        # LOG SEARCH QUERY
-        # -------------------------------------------------
+        # =================================================
+        # EMPTY QUERY VALIDATION
+        # =================================================
+
+        if not search_query.strip():
+
+            raise HTTPException(
+                status_code=400,
+                detail="Clinical search query is empty"
+            )
+
+        # =================================================
+        # LOG QUERY
+        # =================================================
 
         log_event(
-            "search_query_generated",
+            "query_generated",
             request_id,
             "Clinical search query generated",
             {
@@ -209,85 +201,36 @@ def clinical_match(request: ClinicalMatchRequest):
             }
         )
 
-        # -------------------------------------------------
-        # LOG GENERATED CONTEXT
-        # -------------------------------------------------
-
-        log_event(
-            "context_generated",
-            request_id,
-            "Clinical context generated",
-            {
-                "generated_context": generated_context
-            }
-        )
-
         # =================================================
-        # PIPELINE EXECUTION
+        # EXECUTE PIPELINE
         # =================================================
 
         result = clinical_match_pipeline(
+
             request=request,
+
             request_id=request_id,
+
             search_query=search_query,
+
             generated_context=generated_context,
+
             combined_symptoms=combined_symptoms,
-            patient_metadata=patient_metadata
+
+            patient_metadata=patient_metadata,
+
+            log_event=log_event
         )
-
-        # =================================================
-        # NO RESULTS FOUND
-        # =================================================
-
-        if not result or len(result.get("matches", [])) == 0:
-
-            log_event(
-                "no_result",
-                request_id,
-                "No similar patient cases found"
-            )
-
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "error": "No Results",
-                    "message": "No similar patient cases found",
-                    "matches": [],
-                    "total_matches_found": 0,
-                    "confidence_score": 0.0
-                }
-            )
-
-        # =================================================
-        # LIMIT TO TOP 2 MATCHES
-        # =================================================
-
-        top_matches = result.get("matches", [])[:2]
-
-        result["matches"] = top_matches
-        result["total_matches_found"] = len(top_matches)
 
         # =================================================
         # RESPONSE TIME
         # =================================================
 
-        response_time = round(
-            (time.time() - start_time) * 1000,
+        processing_time = round(
+            (
+                time.time() - start_time
+            ) * 1000,
             2
-        )
-
-        # =================================================
-        # SUCCESS LOGGING
-        # =================================================
-
-        log_event(
-            "response_ready",
-            request_id,
-            "Clinical response prepared successfully",
-            {
-                "response_time_ms": response_time,
-                "matches_returned": len(top_matches)
-            }
         )
 
         # =================================================
@@ -295,44 +238,124 @@ def clinical_match(request: ClinicalMatchRequest):
         # =================================================
 
         final_response = {
-            **result,
-            "request_id": request_id,
-            "search_query": search_query,
-            "generated_context": generated_context,
-            "processing_time_ms": response_time,
-            "input_fields_used": available_fields
+
+            "status":
+                result.get(
+                    "status",
+                    "Success"
+                ),
+
+            "message":
+                result.get(
+                    "message",
+                    "Clinical matching completed"
+                ),
+
+            "request_id":
+                request_id,
+
+            "api_version":
+                "4.0.0",
+
+            "request_timestamp":
+                time.strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
+
+            "matches":
+                result.get(
+                    "matches",
+                    []
+                )[:2],
+
+            "total_matches_found":
+                min(
+                    2,
+                    result.get(
+                        "total_matches_found",
+                        0
+                    )
+                ),
+
+            "confidence_score":
+                result.get(
+                    "confidence_score",
+                    0.0
+                ),
+
+            "search_query":
+                search_query,
+
+            "generated_context":
+                generated_context,
+
+            "input_fields_used":
+                available_fields,
+
+            "processing_time_ms":
+                processing_time,
+
+            "explanation":
+                result.get(
+                    "explanation",
+                    "Top clinical matches retrieved using semantic similarity"
+                )
         }
 
-        return ClinicalMatchResponse(**final_response)
+        # =================================================
+        # SUCCESS LOG
+        # =================================================
+
+        log_event(
+            "response_generated",
+            request_id,
+            "Clinical response generated",
+            {
+                "matches":
+                    final_response[
+                        "total_matches_found"
+                    ],
+
+                "processing_time_ms":
+                    processing_time
+            }
+        )
+
+        return ClinicalMatchResponse(
+            **final_response
+        )
 
     # =====================================================
-    # EXPECTED ERRORS
+    # HTTP ERRORS
     # =====================================================
 
-    except HTTPException as http_err:
+    except HTTPException as http_error:
 
         log_event(
             "http_error",
             request_id,
-            "Handled HTTP exception",
+            "HTTP exception occurred",
             {
-                "status_code": http_err.status_code,
-                "detail": str(http_err.detail)
+                "status_code":
+                    http_error.status_code,
+
+                "detail":
+                    str(http_error.detail)
             }
         )
 
-        raise http_err
+        raise http_error
 
     # =====================================================
-    # UNEXPECTED ERRORS
+    # UNKNOWN ERRORS
     # =====================================================
 
     except Exception as e:
 
         log_event(
-            "pipeline_error",
+            "pipeline_failure",
             request_id,
-            "Clinical pipeline execution failure",
+            "Clinical pipeline failure",
             {
                 "error": str(e)
             }
@@ -341,46 +364,29 @@ def clinical_match(request: ClinicalMatchRequest):
         raise HTTPException(
             status_code=500,
             detail={
-                "error": "Internal Server Error",
-                "message": "Error occurred while processing clinical request",
-                "matches": [],
-                "confidence_score": 0.0,
-                "explanation": str(e)
+                "status": "Failed",
+                "message":
+                    "Internal clinical pipeline failure",
+                "error":
+                    str(e)
             }
         )
 
 
 # =========================================================
-# DEBUG SAMPLE ROUTE
+# DEBUG ROUTE
 # =========================================================
 
-@app.get("/debug/sample-query")
-def sample_query():
+@app.get("/debug/sample")
+def debug_sample():
 
     return {
 
-        "sample_search_query":
-            "Knee pain | Swelling | ACL injury | Difficulty walking",
+        "sample_query":
+            "Knee pain | ACL injury | swelling",
 
         "sample_context":
-            """
-            Chief Complaint: Knee pain and instability
-            Affected Body Part: Right Knee
-            Symptoms Duration: 3 months
-            Previous Injuries: ACL tear history
-            Current Medications: Ibuprofen
-            Allergies: None
-            Occupation: Athlete
-            Activity Levels: High
-            Gender: Male
-            Age: 24
-            Doctor Name: Dr. Smith
-            Subjective Assessment: Pain increases during running
-            Functional Assessment: Difficulty climbing stairs
-            Physical Examination: Swelling and tenderness over ACL region
-            Objective Findings: Reduced range of motion
-            Patient Pain Classification: Moderate
-            """
+            "Patient with chronic knee pain and swelling"
     }
 
 
