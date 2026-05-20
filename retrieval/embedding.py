@@ -1,554 +1,503 @@
-import numpy as np
-import torch
-import logging
-import json
-import time
+from pydantic import (
+    BaseModel,
+    Field,
+    field_validator,
+    model_validator,
+    ConfigDict
+)
+
+from typing import (
+    Optional,
+    Dict,
+    Any,
+    List
+)
+
 import re
-from typing import List
-
-from transformers import (
-    AutoTokenizer,
-    AutoModel
-)
-
-logger = logging.getLogger(__name__)
 
 
 # =========================================================
-# LOGGING CONFIGURATION
+# SAFE TEXT CLEANER
 # =========================================================
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    force=True
-)
+def clean_text(value):
 
-
-# =========================================================
-# LOGGING HELPER
-# =========================================================
-
-def log_event(event_type, message, extra=None):
-
-    log_data = {
-        "event": event_type,
-        "message": message,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-    }
-
-    if extra:
-        log_data.update(extra)
-
-    logger.info(json.dumps(log_data))
-
-
-# =========================================================
-# TEXT CLEANING
-# =========================================================
-
-def clean_text(text):
-
-    if text is None:
+    if value is None:
         return ""
 
-    text = str(text)
+    value = str(value)
 
-    text = text.strip()
+    value = value.strip()
 
-    text = re.sub(r"\s+", " ", text)
+    value = re.sub(r"\s+", " ", value)
 
-    return text
+    value = re.sub(
+        r"[^\w\s,.\-:/()]",
+        "",
+        value
+    )
 
-
-# =========================================================
-# CLINICAL KEYWORD ENHANCEMENT
-# =========================================================
-
-def enrich_clinical_text(text):
-
-    text = clean_text(text)
-
-    clinical_keywords = [
-
-        "pain",
-        "swelling",
-        "fracture",
-        "injury",
-        "stiffness",
-        "mobility",
-        "inflammation",
-        "muscle",
-        "joint",
-        "sprain",
-        "tenderness",
-        "weakness",
-        "arthritis",
-        "back pain",
-        "knee pain",
-        "shoulder pain",
-        "neck pain",
-        "posture",
-        "movement restriction",
-        "functional limitation",
-        "physical examination",
-        "objective findings",
-        "clinical history",
-        "range of motion",
-        "sports injury",
-        "ligament injury",
-        "rehabilitation"
-    ]
-
-    lower_text = text.lower()
-
-    matched_keywords = []
-
-    for keyword in clinical_keywords:
-
-        if keyword in lower_text:
-
-            matched_keywords.append(keyword)
-
-    matched_keywords = list(set(matched_keywords))
-
-    if matched_keywords:
-
-        text += (
-            " | " +
-            " ".join(matched_keywords)
-        )
-
-    return text
+    return value.strip()
 
 
 # =========================================================
-# BIOBERT EMBEDDING CLASS
+# REQUEST MODEL
 # =========================================================
 
-class BioBERTEmbedding:
-
-    _instance = None
+class ClinicalMatchRequest(BaseModel):
 
     # =====================================================
-    # SINGLETON INITIALIZATION
+    # BASIC PATIENT DETAILS
     # =====================================================
 
-    def __new__(cls):
+    chief_complaint: Optional[str] = Field(
+        default="",
+        max_length=500,
+        description="Primary complaint reported by the patient"
+    )
 
-        if cls._instance is None:
+    affected_body_part: Optional[str] = Field(
+        default="",
+        max_length=200,
+        description="Affected body part or region"
+    )
 
-            cls._instance = super(
-                BioBERTEmbedding,
-                cls
-            ).__new__(cls)
+    symptoms_duration: Optional[str] = Field(
+        default="",
+        max_length=100,
+        description="Duration of symptoms"
+    )
 
-            try:
+    previous_injuries: Optional[str] = Field(
+        default="",
+        max_length=500,
+        description="History of previous injuries"
+    )
 
-                # -------------------------------------------------
-                # DEVICE
-                # -------------------------------------------------
+    current_medications: Optional[str] = Field(
+        default="",
+        max_length=500,
+        description="Current medications used by patient"
+    )
 
-                cls._instance.device = torch.device(
+    allergies: Optional[str] = Field(
+        default="",
+        max_length=300,
+        description="Known allergies"
+    )
 
-                    "cuda"
+    occupation: Optional[str] = Field(
+        default="",
+        max_length=200,
+        description="Patient occupation"
+    )
 
-                    if torch.cuda.is_available()
+    activity_levels: Optional[str] = Field(
+        default="",
+        max_length=100,
+        description="Patient activity levels"
+    )
 
-                    else "cpu"
-                )
+    gender: Optional[str] = Field(
+        default="",
+        max_length=30,
+        description="Patient gender"
+    )
 
-                # -------------------------------------------------
-                # MODEL NAME
-                # -------------------------------------------------
+    age: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=120,
+        description="Patient age"
+    )
 
-                cls._instance.MODEL_NAME = (
-                    "emilyalsentzer/Bio_ClinicalBERT"
-                )
-
-                print(
-                    "\n🔄 Loading BioClinicalBERT model..."
-                )
-
-                log_event(
-                    "model_loading",
-                    "Loading BioClinicalBERT model"
-                )
-
-                # -------------------------------------------------
-                # TOKENIZER
-                # -------------------------------------------------
-
-                cls._instance.tokenizer = (
-                    AutoTokenizer.from_pretrained(
-                        cls._instance.MODEL_NAME
-                    )
-                )
-
-                # -------------------------------------------------
-                # MODEL
-                # -------------------------------------------------
-
-                cls._instance.model = (
-                    AutoModel.from_pretrained(
-                        cls._instance.MODEL_NAME
-                    )
-                )
-
-                cls._instance.model.to(
-                    cls._instance.device
-                )
-
-                cls._instance.model.eval()
-
-                print(
-                    "✅ BioClinicalBERT loaded successfully\n"
-                )
-
-                log_event(
-                    "model_loaded",
-                    "BioClinicalBERT loaded successfully",
-                    {
-                        "device":
-                            str(
-                                cls._instance.device
-                            )
-                    }
-                )
-
-            except Exception as e:
-
-                log_event(
-                    "model_load_error",
-                    "Failed to load BioClinicalBERT",
-                    {
-                        "error": str(e)
-                    }
-                )
-
-                raise e
-
-        return cls._instance
+    doctor_name: Optional[str] = Field(
+        default="",
+        max_length=100,
+        description="Doctor or clinician name"
+    )
 
     # =====================================================
-    # MEAN POOLING
+    # CLINICAL DETAILS
     # =====================================================
 
-    def mean_pooling(
-        self,
-        token_embeddings,
-        attention_mask
+    subjective_assessment: Optional[str] = Field(
+        default="",
+        max_length=1500,
+        description="Subjective clinical assessment"
+    )
+
+    functional_assessment: Optional[str] = Field(
+        default="",
+        max_length=1500,
+        description="Functional limitations or assessment"
+    )
+
+    physical_examination: Optional[str] = Field(
+        default="",
+        max_length=1500,
+        description="Physical examination findings"
+    )
+
+    objective_findings: Optional[str] = Field(
+        default="",
+        max_length=1500,
+        description="Objective clinical findings"
+    )
+
+    patient_pain_classification: Optional[str] = Field(
+        default="",
+        max_length=100,
+        description="Pain severity classification"
+    )
+
+    symptoms: Optional[str] = Field(
+        default="",
+        max_length=2000,
+        description="Combined symptom description"
+    )
+
+    doctor_notes: Optional[str] = Field(
+        default="",
+        max_length=3000,
+        description="Doctor notes"
+    )
+
+    clinical_history: Optional[str] = Field(
+        default="",
+        max_length=3000,
+        description="Complete clinical history"
+    )
+
+    additional_findings: Optional[str] = Field(
+        default="",
+        max_length=2000,
+        description="Additional findings"
+    )
+
+    medications_history: Optional[str] = Field(
+        default="",
+        max_length=2000,
+        description="Medication history"
+    )
+
+    # =====================================================
+    # SYSTEM GENERATED FIELDS
+    # =====================================================
+
+    search_query: Optional[str] = Field(
+        default="",
+        description="Generated semantic search query"
+    )
+
+    generated_context: Optional[str] = Field(
+        default="",
+        description="Generated clinical context"
+    )
+
+    # =====================================================
+    # MODEL CONFIG
+    # =====================================================
+
+    model_config = ConfigDict(
+        extra="ignore",
+        str_strip_whitespace=True
+    )
+
+    # =====================================================
+    # FIELD CLEANING
+    # =====================================================
+
+    @field_validator(
+        "*",
+        mode="before"
+    )
+    @classmethod
+    def clean_string_fields(
+        cls,
+        value
     ):
 
-        mask = attention_mask.unsqueeze(-1).expand(
-            token_embeddings.size()
-        ).float()
+        if isinstance(value, str):
 
-        masked_embeddings = (
-            token_embeddings * mask
-        )
+            value = clean_text(value)
 
-        summed_embeddings = torch.sum(
-            masked_embeddings,
-            dim=1
-        )
-
-        summed_mask = torch.clamp(
-            mask.sum(dim=1),
-            min=1e-9
-        )
-
-        pooled_embedding = (
-            summed_embeddings / summed_mask
-        )
-
-        return pooled_embedding
+        return value
 
     # =====================================================
-    # GENERATE SINGLE EMBEDDING
+    # GENDER VALIDATION
     # =====================================================
 
-    def get_embedding(
-        self,
-        text: str
-    ) -> np.ndarray:
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(
+        cls,
+        value
+    ):
 
-        start_time = time.time()
+        if value in [None, ""]:
 
-        # -------------------------------------------------
-        # INPUT VALIDATION
-        # -------------------------------------------------
+            return ""
 
-        if not text:
+        allowed = [
+
+            "male",
+            "female",
+            "other",
+            "prefer not to say"
+        ]
+
+        if value.lower() not in allowed:
 
             raise ValueError(
-                "Input text is empty"
+                "Gender must be Male, Female, Other, or Prefer not to say"
             )
 
-        if not isinstance(text, str):
+        return value.title()
+
+    # =====================================================
+    # AGE VALIDATION
+    # =====================================================
+
+    @field_validator("age")
+    @classmethod
+    def validate_age(
+        cls,
+        value
+    ):
+
+        if value is None:
+
+            return value
+
+        if value < 0 or value > 120:
 
             raise ValueError(
-                "Input text must be string"
+                "Age must be between 0 and 120"
             )
 
-        text = clean_text(text)
+        return value
 
-        if not text.strip():
+    # =====================================================
+    # AT LEAST ONE INPUT VALIDATION
+    # =====================================================
+
+    @model_validator(mode="after")
+    def validate_at_least_one_field(
+        self
+    ):
+
+        values = self.model_dump()
+
+        non_empty_fields = [
+
+            value
+
+            for value in values.values()
+
+            if value not in [None, "", [], {}]
+        ]
+
+        if len(non_empty_fields) == 0:
 
             raise ValueError(
-                "Input text became empty after cleaning"
+                "At least one clinical input field is required"
             )
 
-        # -------------------------------------------------
-        # CLINICAL ENRICHMENT
-        # -------------------------------------------------
-
-        enriched_text = enrich_clinical_text(
-            text
-        )
-
-        log_event(
-            "text_enriched",
-            "Clinical text enhanced",
-            {
-                "original_length":
-                    len(text),
-
-                "enhanced_length":
-                    len(enriched_text)
-            }
-        )
-
-        # -------------------------------------------------
-        # TOKENIZATION
-        # -------------------------------------------------
-
-        try:
-
-            inputs = self.tokenizer(
-
-                enriched_text,
-
-                return_tensors="pt",
-
-                truncation=True,
-
-                padding=True,
-
-                max_length=512
-            )
-
-            inputs = {
-
-                k: v.to(self.device)
-
-                for k, v in inputs.items()
-            }
-
-        except Exception as e:
-
-            log_event(
-                "tokenization_error",
-                "Error during tokenization",
-                {
-                    "error": str(e)
-                }
-            )
-
-            raise e
-
-        # -------------------------------------------------
-        # MODEL INFERENCE
-        # -------------------------------------------------
-
-        try:
-
-            with torch.no_grad():
-
-                outputs = self.model(
-                    **inputs
-                )
-
-        except Exception as e:
-
-            log_event(
-                "model_inference_error",
-                "Model inference failed",
-                {
-                    "error": str(e)
-                }
-            )
-
-            raise e
-
-        # -------------------------------------------------
-        # MEAN POOLING
-        # -------------------------------------------------
-
-        try:
-
-            token_embeddings = (
-                outputs.last_hidden_state
-            )
-
-            attention_mask = (
-                inputs["attention_mask"]
-            )
-
-            pooled_embedding = self.mean_pooling(
-
-                token_embeddings,
-
-                attention_mask
-            )
-
-            embedding = (
-
-                pooled_embedding
-
-                .cpu()
-
-                .numpy()[0]
-            )
-
-        except Exception as e:
-
-            log_event(
-                "pooling_error",
-                "Mean pooling failed",
-                {
-                    "error": str(e)
-                }
-            )
-
-            raise e
-
-        # -------------------------------------------------
-        # NORMALIZATION
-        # -------------------------------------------------
-
-        try:
-
-            norm = np.linalg.norm(
-                embedding
-            )
-
-            if norm == 0:
-
-                raise ValueError(
-                    "Zero norm embedding encountered"
-                )
-
-            embedding = embedding / norm
-
-        except Exception as e:
-
-            log_event(
-                "normalization_error",
-                "Embedding normalization failed",
-                {
-                    "error": str(e)
-                }
-            )
-
-            raise e
-
-        # -------------------------------------------------
-        # FINAL LOGGING
-        # -------------------------------------------------
-
-        total_time = round(
-            (
-                time.time() -
-                start_time
-            ) * 1000,
-            2
-        )
-
-        log_event(
-            "embedding_generated",
-            "Clinical embedding generated successfully",
-            {
-                "embedding_dimension":
-                    len(embedding),
-
-                "processing_time_ms":
-                    total_time
-            }
-        )
-
-        return embedding
+        return self
 
     # =====================================================
-    # GENERATE BATCH EMBEDDINGS
+    # AVAILABLE INPUT FIELDS
     # =====================================================
 
-    def get_batch_embeddings(
-        self,
-        texts: List[str]
-    ) -> List[np.ndarray]:
+    def get_available_fields(
+        self
+    ) -> List[str]:
 
-        embeddings = []
+        return [
 
-        if not isinstance(texts, list):
+            field_name
 
-            raise ValueError(
-                "texts must be a list"
-            )
+            for field_name, value
+            in self.model_dump().items()
 
-        for index, text in enumerate(texts):
+            if value not in [None, "", [], {}]
+        ]
 
-            try:
+    # =====================================================
+    # SEARCH QUERY GENERATION
+    # =====================================================
 
-                embedding = self.get_embedding(
-                    text
+    def build_search_query(
+        self
+    ) -> str:
+
+        weighted_fields = [
+
+            self.chief_complaint,
+            self.affected_body_part,
+            self.symptoms,
+            self.subjective_assessment,
+            self.functional_assessment,
+            self.physical_examination,
+            self.objective_findings,
+            self.patient_pain_classification,
+            self.previous_injuries,
+            self.clinical_history,
+            self.additional_findings,
+            self.doctor_notes
+        ]
+
+        query_parts = []
+
+        for item in weighted_fields:
+
+            cleaned = clean_text(item)
+
+            if cleaned:
+
+                query_parts.append(cleaned)
+
+        search_query = " | ".join(query_parts)
+
+        return search_query.strip()
+
+    # =====================================================
+    # CONTEXT GENERATION
+    # =====================================================
+
+    def build_context(
+        self
+    ) -> str:
+
+        context_parts = []
+
+        field_map = {
+
+            "Age": self.age,
+            "Gender": self.gender,
+            "Occupation": self.occupation,
+            "Activity Levels": self.activity_levels,
+            "Chief Complaint": self.chief_complaint,
+            "Affected Body Part": self.affected_body_part,
+            "Symptoms Duration": self.symptoms_duration,
+            "Symptoms": self.symptoms,
+            "Subjective Assessment": self.subjective_assessment,
+            "Functional Assessment": self.functional_assessment,
+            "Physical Examination": self.physical_examination,
+            "Objective Findings": self.objective_findings,
+            "Pain Classification": self.patient_pain_classification,
+            "Previous Injuries": self.previous_injuries,
+            "Current Medications": self.current_medications,
+            "Allergies": self.allergies,
+            "Doctor Notes": self.doctor_notes,
+            "Clinical History": self.clinical_history,
+            "Additional Findings": self.additional_findings,
+            "Doctor Name": self.doctor_name
+        }
+
+        for key, value in field_map.items():
+
+            if value not in [None, "", [], {}]:
+
+                context_parts.append(
+                    f"{key}: {value}"
                 )
 
-                embeddings.append(
-                    embedding
-                )
+        return "\n".join(context_parts)
 
-            except Exception as e:
+    # =====================================================
+    # COMBINED SYMPTOMS
+    # =====================================================
 
-                log_event(
-                    "batch_embedding_error",
-                    "Error generating batch embedding",
-                    {
-                        "index": index,
-                        "error": str(e)
-                    }
-                )
+    def build_combined_symptoms(
+        self
+    ) -> str:
 
-                continue
+        symptom_fields = [
 
-        log_event(
-            "batch_embedding_completed",
-            "Batch embedding generation completed",
-            {
-                "total_inputs":
-                    len(texts),
+            self.chief_complaint,
+            self.subjective_assessment,
+            self.objective_findings,
+            self.physical_examination,
+            self.symptoms,
+            self.patient_pain_classification
+        ]
 
-                "successful_embeddings":
-                    len(embeddings)
-            }
+        combined = " | ".join([
+
+            clean_text(item)
+
+            for item in symptom_fields
+
+            if item not in [None, ""]
+        ])
+
+        return combined.strip()
+
+    # =====================================================
+    # PATIENT METADATA
+    # =====================================================
+
+    def build_patient_metadata(
+        self
+    ) -> Dict[str, Any]:
+
+        return {
+
+            "age": self.age,
+
+            "gender": self.gender,
+
+            "occupation": self.occupation,
+
+            "activity_levels": self.activity_levels,
+
+            "doctor_name": self.doctor_name
+        }
+
+    # =====================================================
+    # DYNAMIC INPUT GENERATION
+    # =====================================================
+
+    def generate_dynamic_inputs(
+        self
+    ) -> Dict[str, Any]:
+
+        search_query = (
+            self.build_search_query()
         )
 
-        return embeddings
+        generated_context = (
+            self.build_context()
+        )
 
-    # =====================================================
-    # EMBEDDING DIMENSION
-    # =====================================================
+        combined_symptoms = (
+            self.build_combined_symptoms()
+        )
 
-    def get_embedding_dimension(self):
+        patient_metadata = (
+            self.build_patient_metadata()
+        )
 
-        try:
+        available_fields = (
+            self.get_available_fields()
+        )
 
-            sample_embedding = self.get_embedding(
-                "sample clinical text"
-            )
+        return {
 
-            return len(sample_embedding)
+            "search_query":
+                search_query,
 
-        except Exception:
+            "generated_context":
+                generated_context,
 
-            return 768
+            "combined_symptoms":
+                combined_symptoms,
+
+            "patient_metadata":
+                patient_metadata,
+
+            "available_fields":
+                available_fields
+        }

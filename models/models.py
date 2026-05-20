@@ -24,6 +24,7 @@ from datetime import datetime
 def clean_text(value):
 
     if value is None:
+
         return ""
 
     value = str(value)
@@ -32,9 +33,26 @@ def clean_text(value):
 
     value = re.sub(r"\s+", " ", value)
 
-    value = re.sub(r"[^\w\s.,\-:/()]", "", value)
+    value = re.sub(
+        r"[^\w\s.,\-:/()]",
+        "",
+        value
+    )
 
     return value
+
+
+# =========================================================
+# SAFE LIST
+# =========================================================
+
+def safe_list(value):
+
+    if isinstance(value, list):
+
+        return value
+
+    return []
 
 
 # =========================================================
@@ -53,7 +71,9 @@ class PatientMetadata(BaseModel):
 
     doctor_name: Optional[str] = ""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(
+        extra="ignore"
+    )
 
 
 # =========================================================
@@ -116,8 +136,9 @@ class ClinicalMatchRequest(BaseModel):
 
     medications_history: Optional[str] = ""
 
-    model_config = ConfigDict(extra="ignore")
-
+    model_config = ConfigDict(
+        extra="ignore"
+    )
 
     # =====================================================
     # FIELD CLEANING
@@ -135,10 +156,10 @@ class ClinicalMatchRequest(BaseModel):
             value = clean_text(value)
 
             if len(value) > 1000:
+
                 value = value[:1000]
 
         return value
-
 
     # =====================================================
     # GENDER VALIDATION
@@ -149,9 +170,11 @@ class ClinicalMatchRequest(BaseModel):
     def validate_gender(cls, value):
 
         if not value:
+
             return ""
 
         allowed = [
+
             "male",
             "female",
             "other",
@@ -166,9 +189,8 @@ class ClinicalMatchRequest(BaseModel):
 
         return value.title()
 
-
     # =====================================================
-    # AT LEAST ONE FIELD VALIDATION
+    # MINIMUM INPUT VALIDATION
     # =====================================================
 
     @model_validator(mode="after")
@@ -180,7 +202,12 @@ class ClinicalMatchRequest(BaseModel):
 
             v for v in values.values()
 
-            if v not in [None, "", [], {}]
+            if v not in [
+                None,
+                "",
+                [],
+                {}
+            ]
         ]
 
         if len(non_empty) == 0:
@@ -190,7 +217,6 @@ class ClinicalMatchRequest(BaseModel):
             )
 
         return self
-
 
     # =====================================================
     # SEARCH QUERY GENERATION
@@ -219,11 +245,15 @@ class ClinicalMatchRequest(BaseModel):
 
             for x in fields
 
-            if x not in [None, ""]
+            if x not in [
+                None,
+                ""
+            ]
         ]
 
-        return " | ".join(cleaned_fields)
-
+        return " | ".join(
+            cleaned_fields
+        )
 
     # =====================================================
     # GENERATED CONTEXT
@@ -235,38 +265,79 @@ class ClinicalMatchRequest(BaseModel):
 
         field_map = {
 
-            "Age": self.age,
-            "Gender": self.gender,
-            "Occupation": self.occupation,
-            "Activity Levels": self.activity_levels,
-            "Doctor Name": self.doctor_name,
-            "Chief Complaint": self.chief_complaint,
-            "Affected Body Part": self.affected_body_part,
-            "Symptoms Duration": self.symptoms_duration,
-            "Symptoms": self.symptoms,
-            "Subjective Assessment": self.subjective_assessment,
-            "Functional Assessment": self.functional_assessment,
-            "Physical Examination": self.physical_examination,
-            "Objective Findings": self.objective_findings,
-            "Pain Classification": self.patient_pain_classification,
-            "Previous Injuries": self.previous_injuries,
-            "Current Medications": self.current_medications,
-            "Allergies": self.allergies,
-            "Clinical History": self.clinical_history,
-            "Doctor Notes": self.doctor_notes,
-            "Additional Findings": self.additional_findings
+            "Age":
+                self.age,
+
+            "Gender":
+                self.gender,
+
+            "Occupation":
+                self.occupation,
+
+            "Activity Levels":
+                self.activity_levels,
+
+            "Doctor Name":
+                self.doctor_name,
+
+            "Chief Complaint":
+                self.chief_complaint,
+
+            "Affected Body Part":
+                self.affected_body_part,
+
+            "Symptoms Duration":
+                self.symptoms_duration,
+
+            "Symptoms":
+                self.symptoms,
+
+            "Subjective Assessment":
+                self.subjective_assessment,
+
+            "Functional Assessment":
+                self.functional_assessment,
+
+            "Physical Examination":
+                self.physical_examination,
+
+            "Objective Findings":
+                self.objective_findings,
+
+            "Pain Classification":
+                self.patient_pain_classification,
+
+            "Previous Injuries":
+                self.previous_injuries,
+
+            "Current Medications":
+                self.current_medications,
+
+            "Allergies":
+                self.allergies,
+
+            "Clinical History":
+                self.clinical_history,
+
+            "Doctor Notes":
+                self.doctor_notes,
+
+            "Additional Findings":
+                self.additional_findings
         }
 
         for key, value in field_map.items():
 
-            if value not in [None, ""]:
+            if value not in [
+                None,
+                ""
+            ]:
 
                 context.append(
                     f"{key}: {value}"
                 )
 
         return "\n".join(context)
-
 
     # =====================================================
     # AVAILABLE FIELDS
@@ -278,9 +349,13 @@ class ClinicalMatchRequest(BaseModel):
 
             k for k, v in self.model_dump().items()
 
-            if v not in [None, "", [], {}]
+            if v not in [
+                None,
+                "",
+                [],
+                {}
+            ]
         ]
-
 
     # =====================================================
     # PATIENT METADATA
@@ -290,13 +365,21 @@ class ClinicalMatchRequest(BaseModel):
 
         return {
 
-            "age": self.age,
-            "gender": self.gender,
-            "occupation": self.occupation,
-            "activity_levels": self.activity_levels,
-            "doctor_name": self.doctor_name
-        }
+            "age":
+                self.age,
 
+            "gender":
+                self.gender,
+
+            "occupation":
+                self.occupation,
+
+            "activity_levels":
+                self.activity_levels,
+
+            "doctor_name":
+                self.doctor_name
+        }
 
     # =====================================================
     # DYNAMIC INPUT PROCESSOR
@@ -304,9 +387,13 @@ class ClinicalMatchRequest(BaseModel):
 
     def generate_dynamic_inputs(self):
 
-        search_query = self.build_search_query()
+        search_query = (
+            self.build_search_query()
+        )
 
-        generated_context = self.build_context()
+        generated_context = (
+            self.build_context()
+        )
 
         combined_symptoms = " | ".join([
 
@@ -315,27 +402,40 @@ class ClinicalMatchRequest(BaseModel):
                 self.symptoms,
                 self.chief_complaint,
                 self.patient_pain_classification,
-                self.subjective_assessment
+                self.subjective_assessment,
+                self.objective_findings
             ]
 
-            if x not in [None, ""]
+            if x not in [
+                None,
+                ""
+            ]
         ])
 
-        patient_metadata = self.get_patient_metadata()
+        patient_metadata = (
+            self.get_patient_metadata()
+        )
 
-        available_fields = self.get_available_fields()
+        available_fields = (
+            self.get_available_fields()
+        )
 
         return {
 
-            "search_query": search_query,
+            "search_query":
+                search_query,
 
-            "generated_context": generated_context,
+            "generated_context":
+                generated_context,
 
-            "combined_symptoms": combined_symptoms,
+            "combined_symptoms":
+                combined_symptoms,
 
-            "patient_metadata": patient_metadata,
+            "patient_metadata":
+                patient_metadata,
 
-            "available_fields": available_fields
+            "available_fields":
+                available_fields
         }
 
 
@@ -345,17 +445,27 @@ class ClinicalMatchRequest(BaseModel):
 
 class RecommendationModel(BaseModel):
 
-    recommended_tests: List[str] = []
+    recommended_tests: List[str] = Field(
+        default_factory=list
+    )
 
-    recommended_medicines: List[str] = []
+    recommended_medicines: List[str] = Field(
+        default_factory=list
+    )
 
     recommendation_notes: str = ""
 
-    physiotherapy_plan: List[str] = []
+    physiotherapy_plan: List[str] = Field(
+        default_factory=list
+    )
 
-    precautions: List[str] = []
+    precautions: List[str] = Field(
+        default_factory=list
+    )
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(
+        extra="ignore"
+    )
 
 
 # =========================================================
@@ -389,11 +499,15 @@ class MatchResult(BaseModel):
 
     symptoms_duration: str = "Unknown"
 
-    doctor_notes: str = "No notes available"
+    doctor_notes: str = (
+        "No notes available"
+    )
 
     clinical_history: str = ""
 
-    matched_keywords: List[str] = []
+    matched_keywords: List[str] = Field(
+        default_factory=list
+    )
 
     searchable_text: str = ""
 
@@ -403,8 +517,9 @@ class MatchResult(BaseModel):
 
     recommendation: RecommendationModel
 
-    model_config = ConfigDict(extra="ignore")
-
+    model_config = ConfigDict(
+        extra="ignore"
+    )
 
     # =====================================================
     # CONFIDENCE VALIDATION
@@ -415,6 +530,7 @@ class MatchResult(BaseModel):
     def validate_confidence(cls, value):
 
         allowed = [
+
             "High",
             "Moderate",
             "Low"
@@ -425,6 +541,40 @@ class MatchResult(BaseModel):
             return "Moderate"
 
         return value
+
+    # =====================================================
+    # MATCH SCORE VALIDATION
+    # =====================================================
+
+    @field_validator("match_score")
+    @classmethod
+    def validate_match_score(cls, value):
+
+        value = float(value)
+
+        value = max(
+            0.0,
+            min(value, 1.0)
+        )
+
+        return round(value, 4)
+
+    # =====================================================
+    # SEMANTIC SCORE VALIDATION
+    # =====================================================
+
+    @field_validator("semantic_score")
+    @classmethod
+    def validate_semantic_score(cls, value):
+
+        value = float(value)
+
+        value = max(
+            0.0,
+            min(value, 1.0)
+        )
+
+        return round(value, 4)
 
 
 # =========================================================
@@ -446,7 +596,9 @@ class ClinicalMatchResponse(BaseModel):
         datetime.utcnow().isoformat()
     )
 
-    matches: List[MatchResult] = []
+    matches: List[MatchResult] = Field(
+        default_factory=list
+    )
 
     total_matches_found: int = 0
 
@@ -459,14 +611,77 @@ class ClinicalMatchResponse(BaseModel):
 
     generated_context: str = ""
 
-    input_fields_used: List[str] = []
+    combined_symptoms: str = ""
+
+    input_fields_used: List[str] = Field(
+        default_factory=list
+    )
 
     processing_time_ms: float = 0.0
 
+    patient_metadata: Dict[str, Any] = Field(
+        default_factory=dict
+    )
+
     explanation: str = ""
 
-    warnings: List[str] = []
+    warnings: List[str] = Field(
+        default_factory=list
+    )
 
     success: bool = True
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(
+        extra="ignore"
+    )
+
+    # =====================================================
+    # TOTAL MATCH VALIDATION
+    # =====================================================
+
+    @field_validator("total_matches_found")
+    @classmethod
+    def validate_total_matches(cls, value):
+
+        if value < 0:
+
+            return 0
+
+        if value > 2:
+
+            return 2
+
+        return value
+
+    # =====================================================
+    # CONFIDENCE SCORE VALIDATION
+    # =====================================================
+
+    @field_validator("confidence_score")
+    @classmethod
+    def validate_confidence_score(cls, value):
+
+        value = float(value)
+
+        value = max(
+            0.0,
+            min(value, 1.0)
+        )
+
+        return round(value, 4)
+
+    # =====================================================
+    # PROCESSING TIME VALIDATION
+    # =====================================================
+
+    @field_validator("processing_time_ms")
+    @classmethod
+    def validate_processing_time(cls, value):
+
+        value = float(value)
+
+        if value < 0:
+
+            return 0.0
+
+        return round(value, 2)

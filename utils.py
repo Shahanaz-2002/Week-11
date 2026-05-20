@@ -7,10 +7,19 @@ import logging
 import json
 import re
 import time
+
 from typing import (
     Dict,
     Any,
     List
+)
+
+from config import (
+    EMBEDDING_VERSION,
+    DEFAULT_RECOMMENDED_TESTS,
+    DEFAULT_RECOMMENDED_MEDICINES,
+    DEFAULT_SKINCARE_PLAN,
+    DEFAULT_PRECAUTIONS
 )
 
 # =========================================================
@@ -35,11 +44,15 @@ def log_event(
 ):
 
     log_data = {
+
         "event": event_type,
+
         "message": message,
-        "timestamp": time.strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+
+        "timestamp":
+            time.strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
     }
 
     if extra:
@@ -50,7 +63,7 @@ def log_event(
     )
 
 # =========================================================
-# TEXT CLEANING
+# TEXT CLEANER
 # =========================================================
 
 def clean_text(text):
@@ -65,6 +78,12 @@ def clean_text(text):
     text = re.sub(
         r"\s+",
         " ",
+        text
+    )
+
+    text = re.sub(
+        r"[^\w\s,.\-:/()]",
+        "",
         text
     )
 
@@ -120,7 +139,7 @@ def is_empty(value):
     ]
 
 # =========================================================
-# DERMATOLOGY QUERY GENERATION
+# BUILD SEARCH QUERY
 # =========================================================
 
 def build_search_query(
@@ -131,7 +150,14 @@ def build_search_query(
 
         clean_text(
             clinical_data.get(
-                "chief_complaint",
+                "skin_condition",
+                ""
+            )
+        ),
+
+        clean_text(
+            clinical_data.get(
+                "affected_skin_area",
                 ""
             )
         ),
@@ -145,7 +171,7 @@ def build_search_query(
 
         clean_text(
             clinical_data.get(
-                "diagnosis",
+                "skin_type",
                 ""
             )
         ),
@@ -166,14 +192,14 @@ def build_search_query(
 
         clean_text(
             clinical_data.get(
-                "patient_pain_classification",
+                "doctor_notes",
                 ""
             )
         ),
 
         clean_text(
             clinical_data.get(
-                "doctor_notes",
+                "clinical_history",
                 ""
             )
         )
@@ -186,11 +212,9 @@ def build_search_query(
         if part
     ]
 
-    search_query = " | ".join(
+    return " | ".join(
         filtered_parts
     )
-
-    return search_query
 
 # =========================================================
 # CONTEXT GENERATION
@@ -210,22 +234,19 @@ def generate_context(
 
         "occupation": "Occupation",
 
-        "activity_levels": "Activity Levels",
+        "skin_type": "Skin Type",
 
-        "chief_complaint":
-            "Chief Complaint",
+        "skin_condition":
+            "Skin Condition",
+
+        "affected_skin_area":
+            "Affected Skin Area",
 
         "symptoms":
             "Symptoms",
 
         "symptoms_duration":
             "Symptoms Duration",
-
-        "diagnosis":
-            "Diagnosis",
-
-        "subjective_assessment":
-            "Subjective Assessment",
 
         "physical_examination":
             "Physical Examination",
@@ -236,14 +257,14 @@ def generate_context(
         "doctor_notes":
             "Doctor Notes",
 
-        "current_medications":
-            "Current Medications",
+        "clinical_history":
+            "Clinical History",
 
         "allergies":
             "Allergies",
 
-        "resolution_notes":
-            "Resolution Notes",
+        "current_medications":
+            "Current Medications",
 
         "doctor_name":
             "Doctor Name"
@@ -286,27 +307,29 @@ def extract_dermatology_keywords(
         "acne",
         "eczema",
         "psoriasis",
+        "fungal infection",
+        "rosacea",
         "dermatitis",
+        "urticaria",
+        "melasma",
+        "vitiligo",
         "rash",
-        "lesion",
-        "papules",
-        "pustules",
-        "pigmentation",
-        "hyperpigmentation",
         "itching",
         "redness",
         "dry skin",
-        "fungal infection",
-        "melasma",
-        "skin allergy",
-        "inflammation",
+        "oily skin",
+        "hyperpigmentation",
+        "papules",
+        "pustules",
         "comedones",
-        "scarring",
+        "scaling",
         "skin irritation",
-        "blisters",
+        "allergic reaction",
         "skin peeling",
-        "skin sensitivity",
-        "allergic reaction"
+        "blisters",
+        "lesions",
+        "tinea",
+        "scabies"
     ]
 
     found_keywords = []
@@ -333,23 +356,21 @@ def build_searchable_text(
 
     searchable_fields = [
 
-        "chief_complaint",
+        "skin_condition",
+
+        "affected_skin_area",
 
         "symptoms",
 
-        "diagnosis",
-
         "doctor_notes",
-
-        "subjective_assessment",
 
         "physical_examination",
 
         "objective_findings",
 
-        "resolution_notes",
+        "clinical_history",
 
-        "category",
+        "skin_type",
 
         "current_medications",
 
@@ -388,7 +409,7 @@ def validate_case_record(
     required_fields = [
 
         "case_id",
-        "chief_complaint"
+        "skin_condition"
     ]
 
     for field in required_fields:
@@ -426,18 +447,33 @@ def normalize_case_record(
     return normalized_record
 
 # =========================================================
+# GENERATE DEFAULT RECOMMENDATIONS
+# =========================================================
+
+def generate_default_recommendations():
+
+    return {
+
+        "recommended_tests":
+            DEFAULT_RECOMMENDED_TESTS,
+
+        "recommended_medicines":
+            DEFAULT_RECOMMENDED_MEDICINES,
+
+        "skincare_plan":
+            DEFAULT_SKINCARE_PLAN,
+
+        "precautions":
+            DEFAULT_PRECAUTIONS
+    }
+
+# =========================================================
 # CSV LOADER
 # =========================================================
 
 def load_cases_from_csv(
     file_path: str
 ) -> Dict[str, Dict[str, Any]]:
-
-    """
-    Load dermatology clinical cases
-    from CSV into dictionary format
-    for MongoDB insertion.
-    """
 
     try:
 
@@ -460,10 +496,6 @@ def load_cases_from_csv(
             }
         )
 
-        # =================================================
-        # ITERATE ROWS
-        # =================================================
-
         for _, row in df.iterrows():
 
             try:
@@ -480,19 +512,27 @@ def load_cases_from_csv(
                     skipped_records += 1
                     continue
 
-                # ---------------------------------------------
-                # BUILD RECORD
-                # ---------------------------------------------
+                recommendations = (
+                    generate_default_recommendations()
+                )
 
                 case_record = {
 
                     "case_id":
                         case_id,
 
-                    "chief_complaint":
+                    "skin_condition":
                         clean_text(
                             row.get(
-                                "chief_complaint",
+                                "skin_condition",
+                                ""
+                            )
+                        ),
+
+                    "affected_skin_area":
+                        clean_text(
+                            row.get(
+                                "affected_skin_area",
                                 ""
                             )
                         ),
@@ -505,10 +545,10 @@ def load_cases_from_csv(
                             )
                         ),
 
-                    "diagnosis":
+                    "skin_type":
                         clean_text(
                             row.get(
-                                "diagnosis",
+                                "skin_type",
                                 ""
                             )
                         ),
@@ -517,14 +557,6 @@ def load_cases_from_csv(
                         clean_text(
                             row.get(
                                 "doctor_notes",
-                                ""
-                            )
-                        ),
-
-                    "subjective_assessment":
-                        clean_text(
-                            row.get(
-                                "subjective_assessment",
                                 ""
                             )
                         ),
@@ -545,51 +577,11 @@ def load_cases_from_csv(
                             )
                         ),
 
-                    "patient_pain_classification":
+                    "clinical_history":
                         clean_text(
                             row.get(
-                                "patient_pain_classification",
+                                "clinical_history",
                                 ""
-                            )
-                        ),
-
-                    "category":
-                        clean_text(
-                            row.get(
-                                "category",
-                                "Dermatology"
-                            )
-                        ),
-
-                    "location":
-                        clean_text(
-                            row.get(
-                                "location",
-                                ""
-                            )
-                        ),
-
-                    "resolution_notes":
-                        clean_text(
-                            row.get(
-                                "resolution_notes",
-                                ""
-                            )
-                        ),
-
-                    "status":
-                        clean_text(
-                            row.get(
-                                "status",
-                                "Closed"
-                            )
-                        ),
-
-                    "resolution_days":
-                        safe_int(
-                            row.get(
-                                "resolution_days",
-                                0
                             )
                         ),
 
@@ -649,26 +641,30 @@ def load_cases_from_csv(
                             )
                         ),
 
-                    "activity_levels":
-                        clean_text(
-                            row.get(
-                                "activity_levels",
-                                ""
-                            )
-                        )
-                }
+                    "recommended_tests":
+                        recommendations[
+                            "recommended_tests"
+                        ],
 
-                # ---------------------------------------------
-                # NORMALIZATION
-                # ---------------------------------------------
+                    "recommended_medicines":
+                        recommendations[
+                            "recommended_medicines"
+                        ],
+
+                    "skincare_plan":
+                        recommendations[
+                            "skincare_plan"
+                        ],
+
+                    "precautions":
+                        recommendations[
+                            "precautions"
+                        ]
+                }
 
                 case_record = normalize_case_record(
                     case_record
                 )
-
-                # ---------------------------------------------
-                # VALIDATION
-                # ---------------------------------------------
 
                 if not validate_case_record(
                     case_record
@@ -676,19 +672,7 @@ def load_cases_from_csv(
 
                     skipped_records += 1
 
-                    log_event(
-                        "invalid_case_skipped",
-                        "Invalid dermatology case skipped",
-                        {
-                            "case_id": case_id
-                        }
-                    )
-
                     continue
-
-                # ---------------------------------------------
-                # DYNAMIC SEARCH QUERY
-                # ---------------------------------------------
 
                 case_record[
                     "search_query"
@@ -696,29 +680,17 @@ def load_cases_from_csv(
                     case_record
                 )
 
-                # ---------------------------------------------
-                # GENERATED CONTEXT
-                # ---------------------------------------------
-
                 case_record[
                     "generated_context"
                 ] = generate_context(
                     case_record
                 )
 
-                # ---------------------------------------------
-                # SEARCHABLE TEXT
-                # ---------------------------------------------
-
                 case_record[
                     "searchable_text"
                 ] = build_searchable_text(
                     case_record
                 )
-
-                # ---------------------------------------------
-                # DERMATOLOGY KEYWORDS
-                # ---------------------------------------------
 
                 case_record[
                     "dermatology_keywords"
@@ -728,31 +700,25 @@ def load_cases_from_csv(
                     ]
                 )
 
-                # ---------------------------------------------
-                # DEFAULT EMBEDDING FIELDS
-                # ---------------------------------------------
-
                 case_record[
                     "embedding"
                 ] = []
 
                 case_record[
                     "embedding_version"
-                ] = ""
+                ] = EMBEDDING_VERSION
 
                 case_record[
                     "embedding_model"
-                ] = ""
+                ] = (
+                    "BioBERT"
+                )
 
                 case_record[
                     "embedding_text"
                 ] = case_record[
                     "searchable_text"
                 ]
-
-                # ---------------------------------------------
-                # ADD TO DATABASE
-                # ---------------------------------------------
 
                 case_database[
                     case_id
@@ -764,17 +730,14 @@ def load_cases_from_csv(
 
                 log_event(
                     "row_processing_error",
-                    "Error processing CSV row",
+                    "CSV row processing failed",
                     {
-                        "error": str(row_error)
+                        "error":
+                            str(row_error)
                     }
                 )
 
                 continue
-
-        # =================================================
-        # SUCCESS LOG
-        # =================================================
 
         log_event(
             "csv_loading_completed",
@@ -790,17 +753,14 @@ def load_cases_from_csv(
 
         return case_database
 
-    # =====================================================
-    # ERROR HANDLING
-    # =====================================================
-
     except FileNotFoundError:
 
         log_event(
             "csv_file_not_found",
             "CSV file not found",
             {
-                "file_path": file_path
+                "file_path":
+                    file_path
             }
         )
 
@@ -810,9 +770,10 @@ def load_cases_from_csv(
 
         log_event(
             "csv_empty",
-            "CSV file is empty",
+            "CSV file empty",
             {
-                "file_path": file_path
+                "file_path":
+                    file_path
             }
         )
 

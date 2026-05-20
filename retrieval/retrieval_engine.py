@@ -4,8 +4,20 @@ import logging
 import json
 import time
 import re
+import traceback
 
 from retrieval.embedding import BioBERTEmbedding
+
+
+# =========================================================
+# CONFIGURATION
+# =========================================================
+
+MIN_SIMILARITY_THRESHOLD = 0.20
+
+MAX_KEYWORD_BOOST = 0.10
+
+MAX_KEYWORDS_RETURN = 10
 
 
 # =========================================================
@@ -19,35 +31,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
-
-# =========================================================
-# SAFE EMBEDDER INITIALIZATION
-# =========================================================
-
-try:
-
-    embedder = BioBERTEmbedding()
-
-    logger.info(
-        json.dumps({
-            "event": "embedder_initialized",
-            "status": "success",
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-        })
-    )
-
-except Exception as e:
-
-    embedder = None
-
-    logger.error(
-        json.dumps({
-            "event": "embedder_initialization_failed",
-            "error": str(e),
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-        })
-    )
 
 
 # =========================================================
@@ -78,7 +61,33 @@ def log_event(
 
 
 # =========================================================
-# TEXT CLEANING
+# SAFE EMBEDDER INITIALIZATION
+# =========================================================
+
+try:
+
+    embedder = BioBERTEmbedding()
+
+    log_event(
+        "embedder_initialized",
+        "BioBERT embedder initialized successfully"
+    )
+
+except Exception as e:
+
+    embedder = None
+
+    log_event(
+        "embedder_initialization_failed",
+        "Failed to initialize BioBERT embedder",
+        {
+            "error": str(e)
+        }
+    )
+
+
+# =========================================================
+# CLEAN TEXT
 # =========================================================
 
 def clean_text(text: Any) -> str:
@@ -94,6 +103,42 @@ def clean_text(text: Any) -> str:
     text = re.sub(r"\s+", " ", text)
 
     return text
+
+
+# =========================================================
+# NORMALIZE TEXT
+# =========================================================
+
+def normalize_text(text: str) -> str:
+
+    text = clean_text(text)
+
+    text = text.lower()
+
+    return text.strip()
+
+
+# =========================================================
+# REMOVE DUPLICATE WORDS
+# =========================================================
+
+def remove_duplicate_words(text: str) -> str:
+
+    words = text.split()
+
+    unique_words = []
+
+    seen = set()
+
+    for word in words:
+
+        if word not in seen:
+
+            seen.add(word)
+
+            unique_words.append(word)
+
+    return " ".join(unique_words)
 
 
 # =========================================================
@@ -153,6 +198,10 @@ def enhance_query(query_text: str) -> str:
             " ".join(detected_keywords)
         )
 
+    query_text = remove_duplicate_words(
+        query_text
+    )
+
     return query_text.strip()
 
 
@@ -202,7 +251,37 @@ def cosine_similarity(
 
 
 # =========================================================
-# BUILD CASE SEARCHABLE TEXT
+# NORMALIZE EMBEDDING
+# =========================================================
+
+def normalize_embedding(
+    embedding
+) -> np.ndarray:
+
+    try:
+
+        embedding = np.array(
+            embedding,
+            dtype=np.float32
+        )
+
+        norm = np.linalg.norm(
+            embedding
+        )
+
+        if norm == 0:
+
+            return embedding
+
+        return embedding / norm
+
+    except Exception:
+
+        return np.array([], dtype=np.float32)
+
+
+# =========================================================
+# BUILD SEARCHABLE TEXT
 # =========================================================
 
 def build_case_search_text(
@@ -234,15 +313,17 @@ def build_case_search_text(
 
         if value not in [None, ""]:
 
-            text_parts.append(
-                clean_text(value)
-            )
+            cleaned = clean_text(value)
+
+            if cleaned:
+
+                text_parts.append(cleaned)
 
     return " | ".join(text_parts)
 
 
 # =========================================================
-# MATCHED KEYWORD EXTRACTION
+# EXTRACT MATCHED KEYWORDS
 # =========================================================
 
 def extract_matched_keywords(
@@ -252,15 +333,13 @@ def extract_matched_keywords(
 
     query_words = set(
 
-        clean_text(query_text)
-        .lower()
+        normalize_text(query_text)
         .split()
     )
 
     searchable_words = set(
 
-        clean_text(searchable_text)
-        .lower()
+        normalize_text(searchable_text)
         .split()
     )
 
@@ -284,7 +363,7 @@ def extract_matched_keywords(
 
     matched = list(set(matched))
 
-    return matched[:10]
+    return matched[:MAX_KEYWORDS_RETURN]
 
 
 # =========================================================
@@ -297,7 +376,9 @@ def apply_keyword_boost(
 ) -> float:
 
     boost = min(
-        0.10,
+
+        MAX_KEYWORD_BOOST,
+
         len(matched_keywords) * 0.01
     )
 
@@ -350,28 +431,6 @@ def safe_case_value(
 
 
 # =========================================================
-# NORMALIZE EMBEDDING
-# =========================================================
-
-def normalize_embedding(
-    embedding
-) -> np.ndarray:
-
-    embedding = np.array(
-        embedding,
-        dtype=np.float32
-    )
-
-    norm = np.linalg.norm(embedding)
-
-    if norm == 0:
-
-        return embedding
-
-    return embedding / norm
-
-
-# =========================================================
 # VALIDATE CASE RECORD
 # =========================================================
 
@@ -395,6 +454,155 @@ def validate_case_record(
 
 
 # =========================================================
+# SAFE EMBEDDING GENERATION
+# =========================================================
+
+def generate_query_embedding(
+    query_text: str
+):
+
+    if embedder is None:
+
+        log_event(
+            "embedding_error",
+            "Embedding model unavailable"
+        )
+
+        return None
+
+    try:
+
+        embedding = embedder.get_embedding(
+            query_text
+        )
+
+        if embedding is None:
+
+            return None
+
+        embedding = normalize_embedding(
+            embedding
+        )
+
+        if embedding.size == 0:
+
+            return None
+
+        return embedding
+
+    except Exception as e:
+
+        log_event(
+            "embedding_generation_error",
+            "Failed to generate embedding",
+            {
+                "error": str(e)
+            }
+        )
+
+        return None
+
+
+# =========================================================
+# BUILD RESULT OBJECT
+# =========================================================
+
+def build_result_object(
+    case_data: Dict,
+    similarity_score: float,
+    boosted_score: float,
+    matched_keywords: List[str],
+    searchable_text: str
+) -> Dict:
+
+    return {
+
+        "case_id":
+            safe_case_value(
+                case_data,
+                "case_id"
+            ),
+
+        "similarity":
+            round(
+                boosted_score,
+                4
+            ),
+
+        "semantic_score":
+            round(
+                similarity_score,
+                4
+            ),
+
+        "chief_complaint":
+            safe_case_value(
+                case_data,
+                "chief_complaint"
+            ),
+
+        "affected_body_part":
+            safe_case_value(
+                case_data,
+                "affected_body_part"
+            ),
+
+        "symptoms_duration":
+            safe_case_value(
+                case_data,
+                "symptoms_duration"
+            ),
+
+        "doctor_notes":
+            safe_case_value(
+                case_data,
+                "doctor_notes",
+                "No notes available"
+            ),
+
+        "clinical_history":
+            safe_case_value(
+                case_data,
+                "clinical_history",
+                ""
+            ),
+
+        "objective_findings":
+            safe_case_value(
+                case_data,
+                "objective_findings",
+                ""
+            ),
+
+        "recommended_tests":
+            case_data.get(
+                "recommended_tests",
+                []
+            ),
+
+        "recommended_medicines":
+            case_data.get(
+                "recommended_medicines",
+                []
+            ),
+
+        "matched_keywords":
+            matched_keywords,
+
+        "confidence_level":
+            get_confidence_level(
+                boosted_score
+            ),
+
+        "retrieval_source":
+            "BioBERT Semantic Retrieval",
+
+        "searchable_text":
+            searchable_text
+    }
+
+
+# =========================================================
 # MAIN RETRIEVAL FUNCTION
 # =========================================================
 
@@ -405,10 +613,6 @@ def retrieve_similar_cases(
 ) -> List[Dict]:
 
     start_time = time.time()
-
-    # =====================================================
-    # INITIAL LOGGING
-    # =====================================================
 
     log_event(
         "retrieval_started",
@@ -465,7 +669,16 @@ def retrieve_similar_cases(
 
         log_event(
             "validation_error",
-            "Case database is invalid"
+            "Case database invalid"
+        )
+
+        return []
+
+    if len(case_database) == 0:
+
+        log_event(
+            "validation_error",
+            "Case database empty"
         )
 
         return []
@@ -488,7 +701,7 @@ def retrieve_similar_cases(
 
     log_event(
         "query_enhanced",
-        "Clinical query enhanced successfully",
+        "Clinical query enhanced",
         {
             "enhanced_query":
                 enhanced_query
@@ -496,87 +709,45 @@ def retrieve_similar_cases(
     )
 
     # =====================================================
-    # EMBEDDER VALIDATION
-    # =====================================================
-
-    if embedder is None:
-
-        log_event(
-            "embedding_error",
-            "Embedding model unavailable"
-        )
-
-        return []
-
-    # =====================================================
     # QUERY EMBEDDING
     # =====================================================
 
-    try:
+    embedding_start = time.time()
 
-        embedding_start = time.time()
+    query_embedding = generate_query_embedding(
+        enhanced_query
+    )
 
-        query_embedding = (
-            embedder.get_embedding(
-                enhanced_query
-            )
-        )
-
-        if query_embedding is None:
-
-            log_event(
-                "embedding_failure",
-                "Query embedding returned None"
-            )
-
-            return []
-
-        query_embedding = normalize_embedding(
-            query_embedding
-        )
-
-        if query_embedding.size == 0:
-
-            log_event(
-                "embedding_failure",
-                "Query embedding is empty"
-            )
-
-            return []
-
-        embedding_time = round(
-
-            (
-                time.time() -
-                embedding_start
-            ) * 1000,
-
-            2
-        )
-
-        log_event(
-            "embedding_generated",
-            "Query embedding generated successfully",
-            {
-                "embedding_dimension":
-                    len(query_embedding),
-
-                "embedding_time_ms":
-                    embedding_time
-            }
-        )
-
-    except Exception as e:
+    if query_embedding is None:
 
         log_event(
             "embedding_failure",
-            "Embedding generation failed",
-            {
-                "error": str(e)
-            }
+            "Query embedding failed"
         )
 
         return []
+
+    embedding_time = round(
+
+        (
+            time.time() -
+            embedding_start
+        ) * 1000,
+
+        2
+    )
+
+    log_event(
+        "embedding_generated",
+        "Query embedding generated",
+        {
+            "embedding_dimension":
+                len(query_embedding),
+
+            "embedding_time_ms":
+                embedding_time
+        }
+    )
 
     # =====================================================
     # RETRIEVAL LOOP
@@ -640,7 +811,7 @@ def retrieve_similar_cases(
             )
 
             # ------------------------------------------------
-            # BUILD SEARCHABLE TEXT
+            # SEARCHABLE TEXT
             # ------------------------------------------------
 
             searchable_text = (
@@ -661,7 +832,7 @@ def retrieve_similar_cases(
             )
 
             # ------------------------------------------------
-            # BOOST FINAL SCORE
+            # SCORE BOOSTING
             # ------------------------------------------------
 
             boosted_score = apply_keyword_boost(
@@ -670,102 +841,29 @@ def retrieve_similar_cases(
             )
 
             # ------------------------------------------------
-            # LOW SCORE FILTER
+            # THRESHOLD FILTER
             # ------------------------------------------------
 
-            if boosted_score < 0.20:
+            if boosted_score < MIN_SIMILARITY_THRESHOLD:
 
                 continue
 
             # ------------------------------------------------
-            # BUILD RESULT OBJECT
+            # BUILD RESULT
             # ------------------------------------------------
 
-            result_object = {
+            result_object = build_result_object(
 
-                "case_id":
-                    safe_case_value(
-                        case_data,
-                        "case_id"
-                    ),
+                case_data=case_data,
 
-                "similarity":
-                    round(
-                        boosted_score,
-                        4
-                    ),
+                similarity_score=similarity_score,
 
-                "semantic_score":
-                    round(
-                        similarity_score,
-                        4
-                    ),
+                boosted_score=boosted_score,
 
-                "chief_complaint":
-                    safe_case_value(
-                        case_data,
-                        "chief_complaint"
-                    ),
+                matched_keywords=matched_keywords,
 
-                "affected_body_part":
-                    safe_case_value(
-                        case_data,
-                        "affected_body_part"
-                    ),
-
-                "symptoms_duration":
-                    safe_case_value(
-                        case_data,
-                        "symptoms_duration"
-                    ),
-
-                "doctor_notes":
-                    safe_case_value(
-                        case_data,
-                        "doctor_notes",
-                        "No notes available"
-                    ),
-
-                "clinical_history":
-                    safe_case_value(
-                        case_data,
-                        "clinical_history",
-                        ""
-                    ),
-
-                "objective_findings":
-                    safe_case_value(
-                        case_data,
-                        "objective_findings",
-                        ""
-                    ),
-
-                "recommended_tests":
-                    case_data.get(
-                        "recommended_tests",
-                        []
-                    ),
-
-                "recommended_medicines":
-                    case_data.get(
-                        "recommended_medicines",
-                        []
-                    ),
-
-                "matched_keywords":
-                    matched_keywords,
-
-                "confidence_level":
-                    get_confidence_level(
-                        boosted_score
-                    ),
-
-                "retrieval_source":
-                    "BioBERT Semantic Retrieval",
-
-                "searchable_text":
-                    searchable_text
-            }
+                searchable_text=searchable_text
+            )
 
             results.append(
                 result_object
@@ -779,9 +877,11 @@ def retrieve_similar_cases(
 
             log_event(
                 "case_processing_error",
-                "Error processing case",
+                "Case processing failed",
                 {
-                    "error": str(e)
+                    "error": str(e),
+                    "traceback":
+                        traceback.format_exc()
                 }
             )
 

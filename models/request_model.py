@@ -17,7 +17,7 @@ import re
 
 
 # =========================================================
-# TEXT CLEANER
+# SAFE TEXT CLEANER
 # =========================================================
 
 def clean_text(value):
@@ -37,7 +37,7 @@ def clean_text(value):
         value
     )
 
-    return value
+    return value.strip()
 
 
 # =========================================================
@@ -71,13 +71,13 @@ class ClinicalMatchRequest(BaseModel):
     previous_injuries: Optional[str] = Field(
         default="",
         max_length=500,
-        description="Any previous injuries or trauma history"
+        description="History of previous injuries"
     )
 
     current_medications: Optional[str] = Field(
         default="",
         max_length=500,
-        description="Current medications being used"
+        description="Current medications used by patient"
     )
 
     allergies: Optional[str] = Field(
@@ -95,20 +95,20 @@ class ClinicalMatchRequest(BaseModel):
     activity_levels: Optional[str] = Field(
         default="",
         max_length=100,
-        description="Daily activity level of patient"
+        description="Patient activity levels"
     )
 
     gender: Optional[str] = Field(
         default="",
-        max_length=20,
-        description="Gender of the patient"
+        max_length=30,
+        description="Patient gender"
     )
 
     age: Optional[int] = Field(
         default=None,
         ge=0,
         le=120,
-        description="Age of the patient"
+        description="Patient age"
     )
 
     doctor_name: Optional[str] = Field(
@@ -118,71 +118,67 @@ class ClinicalMatchRequest(BaseModel):
     )
 
     # =====================================================
-    # CLINICAL ASSESSMENT
+    # CLINICAL DETAILS
     # =====================================================
 
     subjective_assessment: Optional[str] = Field(
         default="",
-        max_length=1000,
-        description="Subjective assessment provided by clinician"
+        max_length=1500,
+        description="Subjective clinical assessment"
     )
 
     functional_assessment: Optional[str] = Field(
         default="",
-        max_length=1000,
-        description="Functional assessment details"
+        max_length=1500,
+        description="Functional limitations or assessment"
     )
 
     physical_examination: Optional[str] = Field(
         default="",
-        max_length=1000,
+        max_length=1500,
         description="Physical examination findings"
     )
 
     objective_findings: Optional[str] = Field(
         default="",
-        max_length=1000,
-        description="Objective or additional findings"
+        max_length=1500,
+        description="Objective clinical findings"
     )
 
     patient_pain_classification: Optional[str] = Field(
         default="",
         max_length=100,
-        description="Pain severity or classification"
+        description="Pain severity classification"
     )
-
-    # =====================================================
-    # ADDITIONAL CLINICAL FIELDS
-    # =====================================================
 
     symptoms: Optional[str] = Field(
         default="",
-        max_length=1500,
+        max_length=2000,
         description="Combined symptom description"
     )
 
     doctor_notes: Optional[str] = Field(
         default="",
-        max_length=2000,
-        description="Additional doctor notes"
+        max_length=3000,
+        description="Doctor notes"
     )
 
     clinical_history: Optional[str] = Field(
         default="",
-        max_length=2000,
+        max_length=3000,
         description="Complete clinical history"
     )
 
     additional_findings: Optional[str] = Field(
         default="",
-        max_length=1500,
-        description="Additional clinical findings"
+        max_length=2000,
+        description="Additional findings"
     )
 
     medications_history: Optional[str] = Field(
         default="",
-        max_length=1500,
-        description="Medication usage history"
+        max_length=2000,
+        description="Medication history"
     )
 
     # =====================================================
@@ -191,77 +187,40 @@ class ClinicalMatchRequest(BaseModel):
 
     search_query: Optional[str] = Field(
         default="",
-        description="Generated retrieval search query"
+        description="Generated semantic search query"
     )
 
     generated_context: Optional[str] = Field(
         default="",
-        description="Generated clinical context for retrieval"
-    )
-
-    model_config = ConfigDict(
-        extra="ignore"
+        description="Generated clinical context"
     )
 
     # =====================================================
-    # TEXT CLEANING VALIDATOR
+    # MODEL CONFIG
+    # =====================================================
+
+    model_config = ConfigDict(
+        extra="ignore",
+        str_strip_whitespace=True
+    )
+
+    # =====================================================
+    # FIELD CLEANING
     # =====================================================
 
     @field_validator(
-        "chief_complaint",
-        "affected_body_part",
-        "symptoms_duration",
-        "previous_injuries",
-        "current_medications",
-        "allergies",
-        "occupation",
-        "activity_levels",
-        "gender",
-        "doctor_name",
-        "subjective_assessment",
-        "functional_assessment",
-        "physical_examination",
-        "objective_findings",
-        "patient_pain_classification",
-        "symptoms",
-        "doctor_notes",
-        "clinical_history",
-        "additional_findings",
-        "medications_history",
+        "*",
         mode="before"
     )
     @classmethod
-    def validate_optional_strings(
+    def clean_string_fields(
         cls,
         value
     ):
 
-        if value is None:
-            return ""
+        if isinstance(value, str):
 
-        value = clean_text(value)
-
-        return value
-
-    # =====================================================
-    # AGE VALIDATION
-    # =====================================================
-
-    @field_validator("age")
-    @classmethod
-    def validate_age(
-        cls,
-        value
-    ):
-
-        if value is None:
-            return value
-
-        if value < 0 or value > 120:
-
-            raise ValueError(
-                "Age must be between 0 and 120"
-            )
+            value = clean_text(value)
 
         return value
 
@@ -276,7 +235,8 @@ class ClinicalMatchRequest(BaseModel):
         value
     ):
 
-        if not value:
+        if value in [None, ""]:
+
             return ""
 
         allowed = [
@@ -296,7 +256,30 @@ class ClinicalMatchRequest(BaseModel):
         return value.title()
 
     # =====================================================
-    # AT LEAST ONE FIELD VALIDATION
+    # AGE VALIDATION
+    # =====================================================
+
+    @field_validator("age")
+    @classmethod
+    def validate_age(
+        cls,
+        value
+    ):
+
+        if value is None:
+
+            return value
+
+        if value < 0 or value > 120:
+
+            raise ValueError(
+                "Age must be between 0 and 120"
+            )
+
+        return value
+
+    # =====================================================
+    # AT LEAST ONE INPUT VALIDATION
     # =====================================================
 
     @model_validator(mode="after")
@@ -306,16 +289,16 @@ class ClinicalMatchRequest(BaseModel):
 
         values = self.model_dump()
 
-        non_empty = [
+        non_empty_fields = [
 
-            field
+            value
 
-            for field in values.values()
+            for value in values.values()
 
-            if field not in [None, "", [], {}]
+            if value not in [None, "", [], {}]
         ]
 
-        if len(non_empty) == 0:
+        if len(non_empty_fields) == 0:
 
             raise ValueError(
                 "At least one clinical input field is required"
@@ -331,17 +314,15 @@ class ClinicalMatchRequest(BaseModel):
         self
     ) -> List[str]:
 
-        available_fields = []
+        return [
 
-        for field_name, value in self.model_dump().items():
+            field_name
 
-            if value not in [None, "", [], {}]:
+            for field_name, value
+            in self.model_dump().items()
 
-                available_fields.append(
-                    field_name
-                )
-
-        return available_fields
+            if value not in [None, "", [], {}]
+        ]
 
     # =====================================================
     # SEARCH QUERY GENERATION
@@ -350,8 +331,6 @@ class ClinicalMatchRequest(BaseModel):
     def build_search_query(
         self
     ) -> str:
-
-        components = []
 
         weighted_fields = [
 
@@ -365,18 +344,21 @@ class ClinicalMatchRequest(BaseModel):
             self.patient_pain_classification,
             self.previous_injuries,
             self.clinical_history,
-            self.additional_findings
+            self.additional_findings,
+            self.doctor_notes
         ]
+
+        query_parts = []
 
         for item in weighted_fields:
 
-            if item not in [None, ""]:
+            cleaned = clean_text(item)
 
-                components.append(item)
+            if cleaned:
 
-        search_query = " | ".join(
-            components
-        )
+                query_parts.append(cleaned)
+
+        search_query = " | ".join(query_parts)
 
         return search_query.strip()
 
@@ -390,7 +372,7 @@ class ClinicalMatchRequest(BaseModel):
 
         context_parts = []
 
-        field_mappings = {
+        field_map = {
 
             "Age": self.age,
             "Gender": self.gender,
@@ -399,42 +381,40 @@ class ClinicalMatchRequest(BaseModel):
             "Chief Complaint": self.chief_complaint,
             "Affected Body Part": self.affected_body_part,
             "Symptoms Duration": self.symptoms_duration,
-            "Previous Injuries": self.previous_injuries,
-            "Current Medications": self.current_medications,
-            "Allergies": self.allergies,
+            "Symptoms": self.symptoms,
             "Subjective Assessment": self.subjective_assessment,
             "Functional Assessment": self.functional_assessment,
             "Physical Examination": self.physical_examination,
             "Objective Findings": self.objective_findings,
             "Pain Classification": self.patient_pain_classification,
-            "Symptoms": self.symptoms,
+            "Previous Injuries": self.previous_injuries,
+            "Current Medications": self.current_medications,
+            "Allergies": self.allergies,
             "Doctor Notes": self.doctor_notes,
             "Clinical History": self.clinical_history,
-            "Doctor Name": self.doctor_name,
-            "Additional Findings": self.additional_findings
+            "Additional Findings": self.additional_findings,
+            "Doctor Name": self.doctor_name
         }
 
-        for field_name, value in field_mappings.items():
+        for key, value in field_map.items():
 
             if value not in [None, "", [], {}]:
 
                 context_parts.append(
-                    f"{field_name}: {value}"
+                    f"{key}: {value}"
                 )
 
-        return "\n".join(
-            context_parts
-        )
+        return "\n".join(context_parts)
 
     # =====================================================
-    # COMBINED SYMPTOMS GENERATION
+    # COMBINED SYMPTOMS
     # =====================================================
 
     def build_combined_symptoms(
         self
     ) -> str:
 
-        symptom_parts = [
+        symptom_fields = [
 
             self.chief_complaint,
             self.subjective_assessment,
@@ -444,19 +424,19 @@ class ClinicalMatchRequest(BaseModel):
             self.patient_pain_classification
         ]
 
-        combined = " ".join([
+        combined = " | ".join([
 
-            str(part)
+            clean_text(item)
 
-            for part in symptom_parts
+            for item in symptom_fields
 
-            if part not in [None, "", []]
+            if item not in [None, ""]
         ])
 
         return combined.strip()
 
     # =====================================================
-    # PATIENT METADATA GENERATION
+    # PATIENT METADATA
     # =====================================================
 
     def build_patient_metadata(
@@ -477,7 +457,7 @@ class ClinicalMatchRequest(BaseModel):
         }
 
     # =====================================================
-    # COMPLETE DYNAMIC PROCESSING
+    # DYNAMIC INPUT GENERATION
     # =====================================================
 
     def generate_dynamic_inputs(

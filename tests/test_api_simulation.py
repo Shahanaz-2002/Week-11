@@ -33,9 +33,21 @@ def generate_request_id():
 def safe_float(value, default=0.0):
 
     try:
+
         return float(value)
+
     except Exception:
+
         return default
+
+
+def safe_list(value):
+
+    if isinstance(value, list):
+
+        return value
+
+    return []
 
 
 # =========================================================
@@ -54,7 +66,9 @@ def validate_success_response(data):
         "generated_context",
         "search_query",
         "processing_time_ms",
-        "explanation"
+        "explanation",
+        "request_id",
+        "api_version"
     ]
 
     # =====================================================
@@ -137,7 +151,7 @@ def validate_success_response(data):
         )
 
     # =====================================================
-    # TOP MATCH LIMIT VALIDATION
+    # TOP 2 VALIDATION
     # =====================================================
 
     if len(data["matches"]) > 2:
@@ -168,10 +182,11 @@ def validate_success_response(data):
             "chief_complaint",
             "affected_body_part",
             "doctor_notes",
-            "recommended_tests",
-            "recommended_medicines",
             "matched_keywords",
-            "similarity_reason"
+            "semantic_score",
+            "retrieval_source",
+            "recommendation",
+            "explanation"
         ]
 
         for field in required_match_fields:
@@ -215,11 +230,40 @@ def validate_success_response(data):
             )
 
         # -------------------------------------------------
-        # LIST VALIDATION
+        # RECOMMENDATION VALIDATION
         # -------------------------------------------------
 
+        recommendation = match.get(
+            "recommendation",
+            {}
+        )
+
         if not isinstance(
-            match["recommended_tests"],
+            recommendation,
+            dict
+        ):
+
+            return (
+                False,
+                "recommendation must be dict"
+            )
+
+        if "recommended_tests" not in recommendation:
+
+            return (
+                False,
+                "Missing recommended_tests"
+            )
+
+        if "recommended_medicines" not in recommendation:
+
+            return (
+                False,
+                "Missing recommended_medicines"
+            )
+
+        if not isinstance(
+            recommendation["recommended_tests"],
             list
         ):
 
@@ -229,7 +273,7 @@ def validate_success_response(data):
             )
 
         if not isinstance(
-            match["recommended_medicines"],
+            recommendation["recommended_medicines"],
             list
         ):
 
@@ -237,6 +281,10 @@ def validate_success_response(data):
                 False,
                 "recommended_medicines must be list"
             )
+
+        # -------------------------------------------------
+        # MATCHED KEYWORDS VALIDATION
+        # -------------------------------------------------
 
         if not isinstance(
             match["matched_keywords"],
@@ -296,6 +344,67 @@ def print_test_result(
     else:
 
         print(f"\nFAIL : {message}")
+
+
+# =========================================================
+# PRINT MATCHES
+# =========================================================
+
+def print_match_summary(matches):
+
+    if not matches:
+
+        print("\nNo matches found")
+
+        return
+
+    print("\nTOP MATCHES SUMMARY:\n")
+
+    for index, match in enumerate(matches, start=1):
+
+        print(f"Match #{index}")
+
+        print(
+            f"Case ID           : "
+            f"{match.get('case_id')}"
+        )
+
+        print(
+            f"Match Score       : "
+            f"{match.get('match_score')}"
+        )
+
+        print(
+            f"Confidence Level  : "
+            f"{match.get('confidence_level')}"
+        )
+
+        print(
+            f"Chief Complaint   : "
+            f"{match.get('chief_complaint')}"
+        )
+
+        print(
+            f"Affected Body Part: "
+            f"{match.get('affected_body_part')}"
+        )
+
+        recommendation = match.get(
+            "recommendation",
+            {}
+        )
+
+        print(
+            f"Recommended Tests : "
+            f"{recommendation.get('recommended_tests', [])}"
+        )
+
+        print(
+            f"Recommended Medicines : "
+            f"{recommendation.get('recommended_medicines', [])}"
+        )
+
+        print("-" * 80)
 
 
 # =========================================================
@@ -445,6 +554,19 @@ def send_request(
             True,
             validation_message
         )
+
+        # =================================================
+        # MATCH SUMMARY
+        # =================================================
+
+        if response.status_code == 200:
+
+            print_match_summary(
+                data.get(
+                    "matches",
+                    []
+                )
+            )
 
         return True
 
@@ -659,6 +781,26 @@ test_cases = [
 
         "expected_status":
             422
+    },
+
+    # =====================================================
+    # NO MATCH CASE
+    # =====================================================
+
+    {
+        "name": "No Match Scenario",
+
+        "payload": {
+
+            "chief_complaint":
+                "Rare unknown neurological issue",
+
+            "affected_body_part":
+                "Brain"
+        },
+
+        "expected_status":
+            200
     }
 ]
 

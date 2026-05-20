@@ -3,16 +3,20 @@ import logging
 import uuid
 import json
 from contextlib import asynccontextmanager
+from typing import Dict, Any
 
 from fastapi import (
     FastAPI,
     HTTPException,
-    Request
+    Request,
+    status
 )
 
 from fastapi.responses import JSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
+
+from fastapi.exceptions import RequestValidationError
 
 import uvicorn
 
@@ -20,9 +24,21 @@ from models.models import (
     ClinicalMatchRequest,
     ClinicalMatchResponse
 )
+
 from services.analyze_service import (
     clinical_match_pipeline
 )
+
+
+# =========================================================
+# API CONFIGURATION
+# =========================================================
+
+API_VERSION = "6.0.0"
+
+APP_NAME = "Clinical Match API"
+
+MAX_MATCHES = 2
 
 
 # =========================================================
@@ -39,14 +55,51 @@ logger = logging.getLogger(__name__)
 
 
 # =========================================================
+# STANDARD RESPONSE HELPERS
+# =========================================================
+
+def generate_request_id() -> str:
+
+    return str(uuid.uuid4())
+
+
+def current_timestamp() -> str:
+
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def standard_error_response(
+    status_text: str,
+    message: str,
+    request_id: str,
+    error: Any = None
+) -> Dict[str, Any]:
+
+    return {
+
+        "status": status_text,
+
+        "message": message,
+
+        "request_id": request_id,
+
+        "api_version": API_VERSION,
+
+        "timestamp": current_timestamp(),
+
+        "error": error
+    }
+
+
+# =========================================================
 # LOG EVENT FUNCTION
 # =========================================================
 
 def log_event(
-    event_type,
-    request_id,
-    message,
-    extra=None
+    event_type: str,
+    request_id: str,
+    message: str,
+    extra: Dict[str, Any] = None
 ):
 
     log_data = {
@@ -57,8 +110,7 @@ def log_event(
 
         "message": message,
 
-        "timestamp":
-            time.strftime("%Y-%m-%d %H:%M:%S")
+        "timestamp": current_timestamp()
     }
 
     if extra:
@@ -77,9 +129,14 @@ async def lifespan(app: FastAPI):
 
     logger.info(
         json.dumps({
+
             "event": "startup",
-            "message": "Clinical Match API Started",
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+
+            "message": f"{APP_NAME} Started",
+
+            "version": API_VERSION,
+
+            "timestamp": current_timestamp()
         })
     )
 
@@ -87,9 +144,14 @@ async def lifespan(app: FastAPI):
 
     logger.info(
         json.dumps({
+
             "event": "shutdown",
-            "message": "Clinical Match API Shutdown",
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+
+            "message": f"{APP_NAME} Shutdown",
+
+            "version": API_VERSION,
+
+            "timestamp": current_timestamp()
         })
     )
 
@@ -100,9 +162,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
 
-    title="Clinical Match API",
+    title=APP_NAME,
 
-    version="5.0.0",
+    version=API_VERSION,
 
     description="""
     AI-Powered Clinical Similarity Matching API
@@ -115,6 +177,8 @@ app = FastAPI(
     - Confidence Score Analysis
     - Error Stabilization & Validation
     - Swagger/OpenAPI Documentation
+    - Structured Error Handling
+    - API Health Monitoring
     """,
 
     lifespan=lifespan
@@ -140,6 +204,48 @@ app.add_middleware(
 
 
 # =========================================================
+# GLOBAL VALIDATION HANDLER
+# =========================================================
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request,
+    exc: RequestValidationError
+):
+
+    request_id = generate_request_id()
+
+    log_event(
+
+        "validation_error",
+
+        request_id,
+
+        "Request validation failed",
+
+        {
+            "errors": exc.errors()
+        }
+    )
+
+    return JSONResponse(
+
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+
+        content=standard_error_response(
+
+            status_text="Failed",
+
+            message="Validation Error",
+
+            request_id=request_id,
+
+            error=exc.errors()
+        )
+    )
+
+
+# =========================================================
 # GLOBAL EXCEPTION HANDLER
 # =========================================================
 
@@ -149,12 +255,16 @@ async def global_exception_handler(
     exc: Exception
 ):
 
-    request_id = str(uuid.uuid4())
+    request_id = generate_request_id()
 
     log_event(
+
         "global_exception",
+
         request_id,
+
         "Unhandled exception occurred",
+
         {
             "error": str(exc)
         }
@@ -164,16 +274,16 @@ async def global_exception_handler(
 
         status_code=500,
 
-        content={
+        content=standard_error_response(
 
-            "status": "Failed",
+            status_text="Failed",
 
-            "message": "Internal Server Error",
+            message="Internal Server Error",
 
-            "request_id": request_id,
+            request_id=request_id,
 
-            "error": str(exc)
-        }
+            error=str(exc)
+        )
     )
 
 
@@ -187,10 +297,10 @@ def root():
     return {
 
         "message":
-            "Clinical Match API Running",
+            f"{APP_NAME} Running",
 
         "version":
-            "5.0.0",
+            API_VERSION,
 
         "status":
             "active",
@@ -216,10 +326,39 @@ def health_check():
             "healthy",
 
         "api":
-            "Clinical Match API",
+            APP_NAME,
+
+        "version":
+            API_VERSION,
 
         "timestamp":
-            time.strftime("%Y-%m-%d %H:%M:%S")
+            current_timestamp()
+    }
+
+
+# =========================================================
+# DEBUG ROUTE
+# =========================================================
+
+@app.get("/debug/sample")
+def debug_sample():
+
+    return {
+
+        "sample_query":
+            "Knee pain | ACL injury | swelling",
+
+        "sample_context":
+            "Patient with chronic knee pain and swelling",
+
+        "sample_fields": [
+
+            "chief_complaint",
+            "affected_body_part",
+            "symptoms_duration",
+            "subjective_assessment",
+            "physical_examination"
+        ]
     }
 
 
@@ -236,7 +375,7 @@ def clinical_match(
     request: ClinicalMatchRequest
 ):
 
-    request_id = str(uuid.uuid4())
+    request_id = generate_request_id()
 
     start_time = time.time()
 
@@ -256,7 +395,7 @@ def clinical_match(
     try:
 
         # =================================================
-        # PROCESS INPUTS
+        # PROCESS DYNAMIC INPUTS
         # =================================================
 
         processed_inputs = (
@@ -266,7 +405,7 @@ def clinical_match(
         search_query = processed_inputs.get(
             "search_query",
             ""
-        )
+        ).strip()
 
         generated_context = processed_inputs.get(
             "generated_context",
@@ -292,7 +431,7 @@ def clinical_match(
         # VALIDATION
         # =================================================
 
-        if not search_query.strip():
+        if not search_query:
 
             raise HTTPException(
 
@@ -348,7 +487,7 @@ def clinical_match(
         )
 
         # =================================================
-        # RESPONSE PROCESSING
+        # SAFE RESULT EXTRACTION
         # =================================================
 
         matches = result.get(
@@ -356,12 +495,27 @@ def clinical_match(
             []
         )
 
-        matches = matches[:2]
+        if not isinstance(matches, list):
+
+            matches = []
+
+        matches = matches[:MAX_MATCHES]
 
         confidence_score = result.get(
             "confidence_score",
             0.0
         )
+
+        try:
+
+            confidence_score = round(
+                float(confidence_score),
+                4
+            )
+
+        except Exception:
+
+            confidence_score = 0.0
 
         processing_time = round(
             (
@@ -371,7 +525,22 @@ def clinical_match(
         )
 
         # =================================================
-        # FINAL RESPONSE
+        # FALLBACK EXPLANATION
+        # =================================================
+
+        explanation = result.get(
+            "explanation"
+        )
+
+        if not explanation:
+
+            explanation = (
+                "Top clinical matches retrieved "
+                "using semantic similarity"
+            )
+
+        # =================================================
+        # STANDARD SUCCESS RESPONSE
         # =================================================
 
         final_response = {
@@ -386,12 +555,10 @@ def clinical_match(
                 request_id,
 
             "api_version":
-                "5.0.0",
+                API_VERSION,
 
             "request_timestamp":
-                time.strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
+                current_timestamp(),
 
             "matches":
                 matches,
@@ -400,10 +567,7 @@ def clinical_match(
                 len(matches),
 
             "confidence_score":
-                round(
-                    float(confidence_score),
-                    4
-                ),
+                confidence_score,
 
             "search_query":
                 search_query,
@@ -424,10 +588,7 @@ def clinical_match(
                 patient_metadata,
 
             "explanation":
-                result.get(
-                    "explanation",
-                    "Top clinical matches retrieved using semantic similarity"
-                )
+                explanation
         }
 
         # =================================================
@@ -507,47 +668,17 @@ def clinical_match(
 
             status_code=500,
 
-            detail={
+            detail=standard_error_response(
 
-                "status":
-                    "Failed",
+                status_text="Failed",
 
-                "message":
-                    "Internal clinical pipeline failure",
+                message="Internal clinical pipeline failure",
 
-                "request_id":
-                    request_id,
+                request_id=request_id,
 
-                "error":
-                    str(e)
-            }
+                error=str(e)
+            )
         )
-
-
-# =========================================================
-# DEBUG ROUTE
-# =========================================================
-
-@app.get("/debug/sample")
-def debug_sample():
-
-    return {
-
-        "sample_query":
-            "Knee pain | ACL injury | swelling",
-
-        "sample_context":
-            "Patient with chronic knee pain and swelling",
-
-        "sample_fields": [
-
-            "chief_complaint",
-            "affected_body_part",
-            "symptoms_duration",
-            "subjective_assessment",
-            "physical_examination"
-        ]
-    }
 
 
 # =========================================================
@@ -564,5 +695,7 @@ if __name__ == "__main__":
 
         port=8000,
 
-        reload=True
+        reload=True,
+
+        log_level="info"
     )

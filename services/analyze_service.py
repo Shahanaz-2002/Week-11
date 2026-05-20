@@ -1,5 +1,8 @@
 import time
 import traceback
+import re
+from typing import Dict, List, Any
+
 from fastapi import HTTPException
 
 from retrieval.retrieval_engine import retrieve_similar_cases
@@ -16,6 +19,10 @@ try:
 
     case_database = fetch_case_database()
 
+    if not isinstance(case_database, list):
+
+        case_database = []
+
 except Exception:
 
     case_database = []
@@ -25,7 +32,7 @@ except Exception:
 # SAFE TEXT HELPER
 # =========================================================
 
-def safe_text(value):
+def safe_text(value) -> str:
 
     if value in [None, "", [], {}]:
 
@@ -35,11 +42,47 @@ def safe_text(value):
 
 
 # =========================================================
+# NORMALIZE TEXT
+# =========================================================
+
+def normalize_text(text: str) -> str:
+
+    text = safe_text(text)
+
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
+
+
+# =========================================================
+# REMOVE DUPLICATES
+# =========================================================
+
+def remove_duplicates(values: List[str]) -> List[str]:
+
+    seen = set()
+
+    cleaned = []
+
+    for value in values:
+
+        normalized = normalize_text(value).lower()
+
+        if normalized and normalized not in seen:
+
+            seen.add(normalized)
+
+            cleaned.append(value)
+
+    return cleaned
+
+
+# =========================================================
 # HELPER FUNCTION:
 # BUILD SEARCH QUERY
 # =========================================================
 
-def build_search_query(request):
+def build_search_query(request) -> str:
 
     query_parts = []
 
@@ -60,11 +103,13 @@ def build_search_query(request):
 
     for field in weighted_fields:
 
-        cleaned = safe_text(field)
+        cleaned = normalize_text(field)
 
         if cleaned:
 
             query_parts.append(cleaned)
+
+    query_parts = remove_duplicates(query_parts)
 
     return " | ".join(query_parts).strip()
 
@@ -74,7 +119,7 @@ def build_search_query(request):
 # BUILD CLINICAL CONTEXT
 # =========================================================
 
-def build_clinical_context(request):
+def build_clinical_context(request) -> str:
 
     context_parts = []
 
@@ -103,7 +148,7 @@ def build_clinical_context(request):
 
     for field_name, value in field_mapping.items():
 
-        cleaned = safe_text(value)
+        cleaned = normalize_text(value)
 
         if cleaned:
 
@@ -115,15 +160,15 @@ def build_clinical_context(request):
 
 
 # =========================================================
-# HELPER FUNCTION:
 # GENERATE RECOMMENDATIONS
 # =========================================================
 
-def generate_recommendations(case):
+def generate_recommendations(case) -> Dict[str, List[str]]:
 
     recommendations = {
 
         "recommended_tests": [],
+
         "recommended_medicines": []
     }
 
@@ -224,7 +269,7 @@ def generate_recommendations(case):
         ]
 
     # =====================================================
-    # SKIN / DERMATOLOGY
+    # SKIN CONDITIONS
     # =====================================================
 
     elif (
@@ -248,7 +293,7 @@ def generate_recommendations(case):
         ]
 
     # =====================================================
-    # DEFAULT
+    # DEFAULT RECOMMENDATIONS
     # =====================================================
 
     else:
@@ -267,11 +312,10 @@ def generate_recommendations(case):
 
 
 # =========================================================
-# HELPER FUNCTION:
 # CONFIDENCE LEVEL
 # =========================================================
 
-def get_confidence_level(score):
+def get_confidence_level(score: float) -> str:
 
     if score >= 0.85:
 
@@ -285,11 +329,10 @@ def get_confidence_level(score):
 
 
 # =========================================================
-# HELPER FUNCTION:
 # GENERATE MATCH EXPLANATION
 # =========================================================
 
-def generate_similarity_reason(case):
+def generate_similarity_reason(case) -> str:
 
     keywords = []
 
@@ -314,6 +357,8 @@ def generate_similarity_reason(case):
     if findings:
         keywords.append(findings)
 
+    keywords = remove_duplicates(keywords)
+
     if len(keywords) == 0:
 
         return (
@@ -328,23 +373,28 @@ def generate_similarity_reason(case):
 
 
 # =========================================================
-# HELPER FUNCTION:
 # SANITIZE MATCH
 # =========================================================
 
-def sanitize_match(case):
+def sanitize_match(case) -> Dict[str, Any]:
 
-    similarity_score = round(
+    try:
 
-        float(
-            case.get(
-                "similarity",
-                0.0
-            )
-        ),
+        similarity_score = round(
 
-        4
-    )
+            float(
+                case.get(
+                    "similarity",
+                    0.0
+                )
+            ),
+
+            4
+        )
+
+    except Exception:
+
+        similarity_score = 0.0
 
     similarity_score = max(
         0.0,
@@ -377,27 +427,35 @@ def sanitize_match(case):
             ),
 
         "chief_complaint":
-            case.get(
-                "chief_complaint",
-                "Unknown"
+            safe_text(
+                case.get(
+                    "chief_complaint",
+                    "Unknown"
+                )
             ),
 
         "affected_body_part":
-            case.get(
-                "affected_body_part",
-                "Unknown"
+            safe_text(
+                case.get(
+                    "affected_body_part",
+                    "Unknown"
+                )
             ),
 
         "symptoms_duration":
-            case.get(
-                "symptoms_duration",
-                "Unknown"
+            safe_text(
+                case.get(
+                    "symptoms_duration",
+                    "Unknown"
+                )
             ),
 
         "doctor_notes":
-            case.get(
-                "doctor_notes",
-                "No notes available"
+            safe_text(
+                case.get(
+                    "doctor_notes",
+                    "No notes available"
+                )
             ),
 
         "matched_keywords":
@@ -475,6 +533,21 @@ def clinical_match_pipeline(
                 }
             )
 
+        if len(case_database) == 0:
+
+            raise HTTPException(
+
+                status_code=500,
+
+                detail={
+                    "status":
+                        "Failed",
+
+                    "message":
+                        "Case database is empty"
+                }
+            )
+
         # =================================================
         # DYNAMIC QUERY GENERATION
         # =================================================
@@ -513,11 +586,23 @@ def clinical_match_pipeline(
 
             ]).strip()
 
+        search_query = normalize_text(
+            search_query
+        )
+
+        generated_context = normalize_text(
+            generated_context
+        )
+
+        combined_symptoms = normalize_text(
+            combined_symptoms
+        )
+
         # =================================================
         # EMPTY QUERY VALIDATION
         # =================================================
 
-        if not search_query.strip():
+        if not search_query:
 
             raise HTTPException(
 
@@ -597,7 +682,7 @@ def clinical_match_pipeline(
             )
 
         # =================================================
-        # NO MATCH FOUND
+        # EMPTY RETRIEVAL FALLBACK
         # =================================================
 
         if not retrieved_cases:
@@ -702,7 +787,7 @@ def clinical_match_pipeline(
             )
 
         # =================================================
-        # OVERALL CONFIDENCE SCORE
+        # CONFIDENCE SCORE
         # =================================================
 
         confidence_score = round(
@@ -716,6 +801,14 @@ def clinical_match_pipeline(
             ]) / len(formatted_matches),
 
             4
+        )
+
+        confidence_score = max(
+            0.0,
+            min(
+                1.0,
+                confidence_score
+            )
         )
 
         # =================================================
