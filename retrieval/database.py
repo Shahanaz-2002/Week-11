@@ -100,7 +100,7 @@ def connect_database():
     try:
 
         # =================================================
-        # MONGODB CLIENT
+        # CREATE CLIENT
         # =================================================
 
         client = MongoClient(
@@ -136,16 +136,20 @@ def connect_database():
         collection = database[COLLECTION_NAME]
 
         # =================================================
-        # LOG SUCCESS
+        # GET DOCUMENT COUNT
         # =================================================
 
         total_documents = collection.count_documents({})
+
+        # =================================================
+        # LOG SUCCESS
+        # =================================================
 
         log_event(
 
             "database_connected",
 
-            "MongoDB connected successfully",
+            "MongoDB connection established successfully",
 
             {
 
@@ -209,7 +213,7 @@ def connect_database():
 
 
 # =========================================================
-# INITIAL DATABASE CONNECTION
+# INITIALIZE DATABASE CONNECTION
 # =========================================================
 
 connect_database()
@@ -222,6 +226,7 @@ connect_database()
 def database_health_check():
 
     global client
+    global collection
 
     try:
 
@@ -238,11 +243,13 @@ def database_health_check():
 
         client.admin.command("ping")
 
-        total_documents = (
-            collection.count_documents({})
-            if collection is not None
-            else 0
-        )
+        total_documents = 0
+
+        if collection is not None:
+
+            total_documents = (
+                collection.count_documents({})
+            )
 
         return {
 
@@ -272,6 +279,141 @@ def database_health_check():
 
 
 # =========================================================
+# CLEAN RECORD
+# =========================================================
+
+def clean_record(
+    record: Dict[str, Any],
+    index: int
+) -> Dict[str, Any]:
+
+    # =====================================================
+    # ENSURE RECORD IS DICTIONARY
+    # =====================================================
+
+    if not isinstance(record, dict):
+
+        return {}
+
+    # =====================================================
+    # REMOVE MONGODB ID
+    # =====================================================
+
+    record.pop("_id", None)
+
+    # =====================================================
+    # ENSURE CASE ID
+    # =====================================================
+
+    if not record.get("case_id"):
+
+        record["case_id"] = (
+            f"CASE_{index+1}"
+        )
+
+    # =====================================================
+    # BUILD SEARCHABLE TEXT
+    # =====================================================
+
+    searchable_fields = [
+
+        str(
+            record.get(
+                "chief_complaint",
+                ""
+            )
+        ),
+
+        str(
+            record.get(
+                "affected_body_part",
+                ""
+            )
+        ),
+
+        str(
+            record.get(
+                "symptoms",
+                ""
+            )
+        ),
+
+        str(
+            record.get(
+                "subjective_assessment",
+                ""
+            )
+        ),
+
+        str(
+            record.get(
+                "objective_findings",
+                ""
+            )
+        ),
+
+        str(
+            record.get(
+                "doctor_notes",
+                ""
+            )
+        ),
+
+        str(
+            record.get(
+                "clinical_history",
+                ""
+            )
+        )
+    ]
+
+    searchable_text = " ".join(
+        searchable_fields
+    ).strip()
+
+    record["searchable_text"] = (
+        searchable_text
+    )
+
+    # =====================================================
+    # HANDLE EMBEDDINGS
+    # =====================================================
+
+    embedding = record.get(
+        "embedding"
+    )
+
+    # If embedding missing
+    # create empty list
+
+    if embedding is None:
+
+        record["embedding"] = []
+
+    # Convert tuple to list
+
+    elif isinstance(
+        embedding,
+        tuple
+    ):
+
+        record["embedding"] = list(
+            embedding
+        )
+
+    # Invalid embedding format
+
+    elif not isinstance(
+        embedding,
+        list
+    ):
+
+        record["embedding"] = []
+
+    return record
+
+
+# =========================================================
 # FETCH CASE DATABASE
 # =========================================================
 
@@ -282,7 +424,7 @@ def fetch_case_database() -> List[Dict[str, Any]]:
     try:
 
         # =================================================
-        # RECONNECT IF COLLECTION LOST
+        # RECONNECT IF NEEDED
         # =================================================
 
         if collection is None:
@@ -301,19 +443,15 @@ def fetch_case_database() -> List[Dict[str, Any]]:
             return []
 
         # =================================================
-        # FETCH ALL DOCUMENTS
+        # FETCH RECORDS
         # =================================================
 
         records = list(
-
-            collection.find(
-                {},
-                {"_id": 0}
-            )
+            collection.find({})
         )
 
         # =================================================
-        # EMPTY DATABASE CHECK
+        # EMPTY DATABASE
         # =================================================
 
         if len(records) == 0:
@@ -336,109 +474,26 @@ def fetch_case_database() -> List[Dict[str, Any]]:
 
             return []
 
-        cleaned_records = []
-
         # =================================================
         # CLEAN RECORDS
         # =================================================
+
+        cleaned_records = []
 
         for index, record in enumerate(records):
 
             try:
 
-                if not isinstance(
+                cleaned_record = clean_record(
                     record,
-                    dict
-                ):
-
-                    continue
-
-                # =========================================
-                # ENSURE CASE ID
-                # =========================================
-
-                if not record.get("case_id"):
-
-                    record["case_id"] = (
-                        f"CASE_{index+1}"
-                    )
-
-                # =========================================
-                # SEARCHABLE TEXT
-                # =========================================
-
-                searchable_text = " ".join([
-
-                    str(
-                        record.get(
-                            "chief_complaint",
-                            ""
-                        )
-                    ),
-
-                    str(
-                        record.get(
-                            "affected_body_part",
-                            ""
-                        )
-                    ),
-
-                    str(
-                        record.get(
-                            "symptoms",
-                            ""
-                        )
-                    ),
-
-                    str(
-                        record.get(
-                            "doctor_notes",
-                            ""
-                        )
-                    ),
-
-                    str(
-                        record.get(
-                            "clinical_history",
-                            ""
-                        )
-                    )
-                ]).strip()
-
-                record["searchable_text"] = (
-                    searchable_text
+                    index
                 )
 
-                # =========================================
-                # HANDLE EMBEDDINGS
-                # =========================================
+                if cleaned_record:
 
-                embedding = record.get(
-                    "embedding"
-                )
-
-                # If embedding not found
-                # still keep the record
-                # retrieval engine can generate later
-
-                if embedding is None:
-
-                    record["embedding"] = []
-
-                # Convert tuple to list if needed
-
-                if isinstance(
-                    embedding,
-                    tuple
-                ):
-
-                    record["embedding"] = list(
-                        embedding
+                    cleaned_records.append(
+                        cleaned_record
                     )
-
-                cleaned_records.append(
-                    record
-                )
 
             except Exception as clean_error:
 
