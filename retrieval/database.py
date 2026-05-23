@@ -5,9 +5,15 @@
 import logging
 import json
 import time
-from typing import List, Dict, Any
+
+from typing import (
+    List,
+    Dict,
+    Any
+)
 
 from pymongo import MongoClient
+
 from pymongo.errors import (
     ConnectionFailure,
     ServerSelectionTimeoutError,
@@ -49,13 +55,16 @@ def log_event(
 
     log_data = {
 
-        "event": event_type,
+        "event":
+            event_type,
 
-        "message": message,
+        "message":
+            message,
 
-        "timestamp": time.strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        "timestamp":
+            time.strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
     }
 
     if extra:
@@ -68,7 +77,7 @@ def log_event(
 
 
 # =========================================================
-# MONGODB CONNECTION
+# GLOBAL DATABASE VARIABLES
 # =========================================================
 
 client = None
@@ -90,6 +99,10 @@ def connect_database():
 
     try:
 
+        # =================================================
+        # MONGODB CLIENT
+        # =================================================
+
         client = MongoClient(
 
             MONGO_URI,
@@ -110,22 +123,40 @@ def connect_database():
 
         client.admin.command("ping")
 
+        # =================================================
+        # CONNECT DATABASE
+        # =================================================
+
         database = client[DATABASE_NAME]
 
+        # =================================================
+        # CONNECT COLLECTION
+        # =================================================
+
         collection = database[COLLECTION_NAME]
+
+        # =================================================
+        # LOG SUCCESS
+        # =================================================
+
+        total_documents = collection.count_documents({})
 
         log_event(
 
             "database_connected",
 
-            "MongoDB connection established successfully",
+            "MongoDB connected successfully",
 
             {
+
                 "database":
                     DATABASE_NAME,
 
                 "collection":
-                    COLLECTION_NAME
+                    COLLECTION_NAME,
+
+                "documents":
+                    total_documents
             }
         )
 
@@ -143,6 +174,7 @@ def connect_database():
             "MongoDB connection failed",
 
             {
+
                 "error":
                     str(connection_error)
             }
@@ -160,9 +192,10 @@ def connect_database():
 
             "database_error",
 
-            "Unexpected database error",
+            "Unexpected MongoDB error",
 
             {
+
                 "error":
                     str(e)
             }
@@ -176,7 +209,7 @@ def connect_database():
 
 
 # =========================================================
-# INITIALIZE CONNECTION
+# INITIAL DATABASE CONNECTION
 # =========================================================
 
 connect_database()
@@ -205,6 +238,12 @@ def database_health_check():
 
         client.admin.command("ping")
 
+        total_documents = (
+            collection.count_documents({})
+            if collection is not None
+            else 0
+        )
+
         return {
 
             "status":
@@ -214,7 +253,10 @@ def database_health_check():
                 DATABASE_NAME,
 
             "collection":
-                COLLECTION_NAME
+                COLLECTION_NAME,
+
+            "documents":
+                total_documents
         }
 
     except Exception as e:
@@ -239,9 +281,9 @@ def fetch_case_database() -> List[Dict[str, Any]]:
 
     try:
 
-        # ================================================
-        # RECONNECT IF NEEDED
-        # ================================================
+        # =================================================
+        # RECONNECT IF COLLECTION LOST
+        # =================================================
 
         if collection is None:
 
@@ -258,9 +300,9 @@ def fetch_case_database() -> List[Dict[str, Any]]:
 
             return []
 
-        # ================================================
-        # FETCH RECORDS
-        # ================================================
+        # =================================================
+        # FETCH ALL DOCUMENTS
+        # =================================================
 
         records = list(
 
@@ -270,55 +312,154 @@ def fetch_case_database() -> List[Dict[str, Any]]:
             )
         )
 
+        # =================================================
+        # EMPTY DATABASE CHECK
+        # =================================================
+
+        if len(records) == 0:
+
+            log_event(
+
+                "database_empty",
+
+                "No records found in MongoDB",
+
+                {
+
+                    "database":
+                        DATABASE_NAME,
+
+                    "collection":
+                        COLLECTION_NAME
+                }
+            )
+
+            return []
+
         cleaned_records = []
 
-        for record in records:
+        # =================================================
+        # CLEAN RECORDS
+        # =================================================
+
+        for index, record in enumerate(records):
 
             try:
 
-                if not isinstance(record, dict):
-
-                    continue
-
-                # ========================================
-                # ENSURE CASE ID EXISTS
-                # ========================================
-
-                if "case_id" not in record:
-
-                    record["case_id"] = (
-                        f"CASE_{len(cleaned_records)+1}"
-                    )
-
-                # ========================================
-                # ENSURE EMBEDDING EXISTS
-                # ========================================
-
-                embedding = record.get(
-                    "embedding",
-                    None
-                )
-
-                if embedding is None:
-
-                    continue
-
                 if not isinstance(
-                    embedding,
-                    list
+                    record,
+                    dict
                 ):
 
                     continue
 
-                if len(embedding) == 0:
+                # =========================================
+                # ENSURE CASE ID
+                # =========================================
 
-                    continue
+                if not record.get("case_id"):
 
-                cleaned_records.append(record)
+                    record["case_id"] = (
+                        f"CASE_{index+1}"
+                    )
 
-            except Exception:
+                # =========================================
+                # SEARCHABLE TEXT
+                # =========================================
+
+                searchable_text = " ".join([
+
+                    str(
+                        record.get(
+                            "chief_complaint",
+                            ""
+                        )
+                    ),
+
+                    str(
+                        record.get(
+                            "affected_body_part",
+                            ""
+                        )
+                    ),
+
+                    str(
+                        record.get(
+                            "symptoms",
+                            ""
+                        )
+                    ),
+
+                    str(
+                        record.get(
+                            "doctor_notes",
+                            ""
+                        )
+                    ),
+
+                    str(
+                        record.get(
+                            "clinical_history",
+                            ""
+                        )
+                    )
+                ]).strip()
+
+                record["searchable_text"] = (
+                    searchable_text
+                )
+
+                # =========================================
+                # HANDLE EMBEDDINGS
+                # =========================================
+
+                embedding = record.get(
+                    "embedding"
+                )
+
+                # If embedding not found
+                # still keep the record
+                # retrieval engine can generate later
+
+                if embedding is None:
+
+                    record["embedding"] = []
+
+                # Convert tuple to list if needed
+
+                if isinstance(
+                    embedding,
+                    tuple
+                ):
+
+                    record["embedding"] = list(
+                        embedding
+                    )
+
+                cleaned_records.append(
+                    record
+                )
+
+            except Exception as clean_error:
+
+                log_event(
+
+                    "record_clean_error",
+
+                    "Failed to clean record",
+
+                    {
+
+                        "error":
+                            str(clean_error)
+                    }
+                )
 
                 continue
+
+        # =================================================
+        # FINAL LOG
+        # =================================================
 
         log_event(
 
@@ -327,6 +468,7 @@ def fetch_case_database() -> List[Dict[str, Any]]:
             "Clinical cases loaded successfully",
 
             {
+
                 "total_records":
                     len(cleaned_records)
             }
@@ -343,6 +485,7 @@ def fetch_case_database() -> List[Dict[str, Any]]:
             "MongoDB fetch failed",
 
             {
+
                 "error":
                     str(mongo_error)
             }
@@ -359,6 +502,7 @@ def fetch_case_database() -> List[Dict[str, Any]]:
             "Unexpected fetch error",
 
             {
+
                 "error":
                     str(e)
             }
@@ -368,10 +512,12 @@ def fetch_case_database() -> List[Dict[str, Any]]:
 
 
 # =========================================================
-# INSERT SINGLE CASE
+# INSERT CASE
 # =========================================================
 
-def insert_case(case_data: Dict[str, Any]):
+def insert_case(
+    case_data: Dict[str, Any]
+):
 
     global collection
 
@@ -385,11 +531,16 @@ def insert_case(case_data: Dict[str, Any]):
 
             return False
 
-        if not isinstance(case_data, dict):
+        if not isinstance(
+            case_data,
+            dict
+        ):
 
             return False
 
-        collection.insert_one(case_data)
+        collection.insert_one(
+            case_data
+        )
 
         log_event(
 
@@ -398,6 +549,7 @@ def insert_case(case_data: Dict[str, Any]):
             "Clinical case inserted successfully",
 
             {
+
                 "case_id":
                     case_data.get(
                         "case_id",
@@ -417,6 +569,7 @@ def insert_case(case_data: Dict[str, Any]):
             "Failed to insert case",
 
             {
+
                 "error":
                     str(e)
             }
@@ -430,7 +583,9 @@ def insert_case(case_data: Dict[str, Any]):
 # =========================================================
 
 def update_case(
+
     case_id: str,
+
     update_fields: Dict[str, Any]
 ):
 
@@ -448,9 +603,14 @@ def update_case(
 
         result = collection.update_one(
 
-            {"case_id": case_id},
+            {
+
+                "case_id":
+                    case_id
+            },
 
             {
+
                 "$set":
                     update_fields
             }
@@ -465,6 +625,7 @@ def update_case(
                 "Clinical case updated",
 
                 {
+
                     "case_id":
                         case_id
                 }
@@ -483,6 +644,7 @@ def update_case(
             "Failed to update case",
 
             {
+
                 "case_id":
                     case_id,
 
@@ -498,7 +660,9 @@ def update_case(
 # DELETE CASE
 # =========================================================
 
-def delete_case(case_id: str):
+def delete_case(
+    case_id: str
+):
 
     global collection
 
@@ -514,7 +678,11 @@ def delete_case(case_id: str):
 
         result = collection.delete_one(
 
-            {"case_id": case_id}
+            {
+
+                "case_id":
+                    case_id
+            }
         )
 
         if result.deleted_count > 0:
@@ -526,6 +694,7 @@ def delete_case(case_id: str):
                 "Clinical case deleted",
 
                 {
+
                     "case_id":
                         case_id
                 }
@@ -544,6 +713,7 @@ def delete_case(case_id: str):
             "Failed to delete case",
 
             {
+
                 "case_id":
                     case_id,
 
@@ -585,6 +755,7 @@ def close_database_connection():
             "Failed to close MongoDB connection",
 
             {
+
                 "error":
                     str(e)
             }
@@ -604,6 +775,7 @@ if __name__ == "__main__":
     health = database_health_check()
 
     print(
+
         json.dumps(
             health,
             indent=4
@@ -612,6 +784,20 @@ if __name__ == "__main__":
 
     cases = fetch_case_database()
 
-    print(f"\nLoaded Cases: {len(cases)}")
+    print(
+        f"\nLoaded Cases: {len(cases)}"
+    )
+
+    if len(cases) > 0:
+
+        print("\nSample Case:\n")
+
+        print(
+
+            json.dumps(
+                cases[0],
+                indent=4
+            )[:1000]
+        )
 
     print("\n===================================\n")
