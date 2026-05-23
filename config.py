@@ -28,6 +28,11 @@ BASE_DIR = os.path.dirname(
 # =========================================================
 # MONGODB CONFIGURATION
 # =========================================================
+# IMPORTANT:
+# CHANGED TO YOUR ACTUAL DATABASE
+# clinical_match1000_db
+# patient_cases
+# =========================================================
 
 MONGO_URI = os.getenv(
     "MONGO_URI",
@@ -36,12 +41,12 @@ MONGO_URI = os.getenv(
 
 DATABASE_NAME = os.getenv(
     "DATABASE_NAME",
-    "dermatology_ai"
+    "clinical_match1000_db"
 )
 
 COLLECTION_NAME = os.getenv(
     "COLLECTION_NAME",
-    "dermatology_cases"
+    "patient_cases"
 )
 
 
@@ -82,12 +87,12 @@ LOW_SCORE_FILTER_THRESHOLD = 0.20
 # =========================================================
 # EMBEDDING CONFIGURATION
 # =========================================================
-
 # IMPORTANT:
 # SAME MODEL MUST BE USED IN:
 # - embedding.py
 # - embedding_store.py
 # - retrieval_engine.py
+# =========================================================
 
 EMBEDDING_MODEL_NAME = (
     "pritamdeka/BioBERT-mnli-snli-scinli-scitail-mednli-stsb"
@@ -137,11 +142,11 @@ MAX_KEYWORD_BOOST = 0.10
 # =========================================================
 
 API_TITLE = (
-    "AI Dermatology Clinical Match API"
+    "AI Clinical Match API"
 )
 
 API_DESCRIPTION = (
-    "AI-powered semantic dermatology retrieval "
+    "AI-powered semantic clinical retrieval "
     "using BioBERT embeddings"
 )
 
@@ -266,12 +271,12 @@ SUPPORTED_SKIN_TYPES = [
 
 DEFAULT_RECOMMENDED_TESTS = [
 
-    "Dermatology Clinical Examination"
+    "Clinical Examination"
 ]
 
 DEFAULT_RECOMMENDED_MEDICINES = [
 
-    "Symptomatic Skin Treatment"
+    "Symptomatic Treatment"
 ]
 
 DEFAULT_SKINCARE_PLAN = [
@@ -287,7 +292,7 @@ DEFAULT_PRECAUTIONS = [
 
     "Avoid harsh chemicals",
 
-    "Maintain proper skin hygiene"
+    "Maintain proper hygiene"
 ]
 
 
@@ -400,12 +405,13 @@ if REQUEST_TIMEOUT_SECONDS <= 0:
 # =========================================================
 
 print("=" * 60)
-print("AI Dermatology Clinical Match API Configuration")
+print("AI Clinical Match API Configuration")
 print("=" * 60)
 
 print(f"Environment               : {ENVIRONMENT}")
 print(f"Device                    : {DEVICE}")
 print(f"Embedding Model           : {EMBEDDING_MODEL_NAME}")
+print(f"Mongo URI                 : {MONGO_URI}")
 print(f"Mongo Database            : {DATABASE_NAME}")
 print(f"Mongo Collection          : {COLLECTION_NAME}")
 print(f"Top K Matches             : {TOP_K}")
