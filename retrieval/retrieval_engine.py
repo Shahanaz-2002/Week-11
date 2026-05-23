@@ -1,10 +1,21 @@
+# =========================================================
+# IMPORTS
+# =========================================================
+
 from typing import List, Dict, Any
+
 import numpy as np
+
 import logging
+
 import json
+
 import time
+
 import re
+
 import traceback
+
 
 from retrieval.embedding import BioBERTEmbedding
 
@@ -25,8 +36,11 @@ MAX_KEYWORDS_RETURN = 10
 # =========================================================
 
 logging.basicConfig(
+
     level=logging.INFO,
+
     format="%(message)s",
+
     force=True
 )
 
@@ -38,8 +52,11 @@ logger = logging.getLogger(__name__)
 # =========================================================
 
 def log_event(
+
     event_type: str,
+
     message: str,
+
     extra: Dict[str, Any] = None
 ):
 
@@ -57,7 +74,9 @@ def log_event(
 
         log_data.update(extra)
 
-    logger.info(json.dumps(log_data))
+    logger.info(
+        json.dumps(log_data)
+    )
 
 
 # =========================================================
@@ -90,7 +109,9 @@ except Exception as e:
 # CLEAN TEXT
 # =========================================================
 
-def clean_text(text: Any) -> str:
+def clean_text(
+    text: Any
+) -> str:
 
     if text is None:
 
@@ -100,7 +121,11 @@ def clean_text(text: Any) -> str:
 
     text = text.strip()
 
-    text = re.sub(r"\s+", " ", text)
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    )
 
     return text
 
@@ -109,20 +134,22 @@ def clean_text(text: Any) -> str:
 # NORMALIZE TEXT
 # =========================================================
 
-def normalize_text(text: str) -> str:
+def normalize_text(
+    text: str
+) -> str:
 
-    text = clean_text(text)
-
-    text = text.lower()
-
-    return text.strip()
+    return clean_text(
+        text
+    ).lower()
 
 
 # =========================================================
 # REMOVE DUPLICATE WORDS
 # =========================================================
 
-def remove_duplicate_words(text: str) -> str:
+def remove_duplicate_words(
+    text: str
+) -> str:
 
     words = text.split()
 
@@ -138,16 +165,22 @@ def remove_duplicate_words(text: str) -> str:
 
             unique_words.append(word)
 
-    return " ".join(unique_words)
+    return " ".join(
+        unique_words
+    )
 
 
 # =========================================================
 # QUERY ENHANCEMENT
 # =========================================================
 
-def enhance_query(query_text: str) -> str:
+def enhance_query(
+    query_text: str
+) -> str:
 
-    query_text = clean_text(query_text)
+    query_text = clean_text(
+        query_text
+    )
 
     medical_keywords = [
 
@@ -187,15 +220,23 @@ def enhance_query(query_text: str) -> str:
 
         if keyword in lower_query:
 
-            detected_keywords.append(keyword)
+            detected_keywords.append(
+                keyword
+            )
 
-    detected_keywords = list(set(detected_keywords))
+    detected_keywords = list(
+        set(detected_keywords)
+    )
 
     if detected_keywords:
 
         query_text += (
+
             " | " +
-            " ".join(detected_keywords)
+
+            " ".join(
+                detected_keywords
+            )
         )
 
     query_text = remove_duplicate_words(
@@ -210,11 +251,18 @@ def enhance_query(query_text: str) -> str:
 # =========================================================
 
 def cosine_similarity(
+
     a: np.ndarray,
+
     b: np.ndarray
+
 ) -> float:
 
     try:
+
+        if a.size == 0 or b.size == 0:
+
+            return 0.0
 
         norm_a = np.linalg.norm(a)
 
@@ -224,15 +272,19 @@ def cosine_similarity(
 
             return 0.0
 
-        similarity = np.dot(a, b) / (
+        similarity = np.dot(
+            a,
+            b
+        ) / (
             norm_a * norm_b
         )
 
         similarity = float(similarity)
 
-        similarity = max(
+        similarity = np.clip(
+            similarity,
             0.0,
-            min(similarity, 1.0)
+            1.0
         )
 
         return similarity
@@ -265,6 +317,10 @@ def normalize_embedding(
             dtype=np.float32
         )
 
+        if embedding.size == 0:
+
+            return embedding
+
         norm = np.linalg.norm(
             embedding
         )
@@ -277,7 +333,10 @@ def normalize_embedding(
 
     except Exception:
 
-        return np.array([], dtype=np.float32)
+        return np.array(
+            [],
+            dtype=np.float32
+        )
 
 
 # =========================================================
@@ -309,17 +368,22 @@ def build_case_search_text(
 
     for field in searchable_fields:
 
-        value = case_data.get(field, "")
+        value = case_data.get(
+            field,
+            ""
+        )
 
-        if value not in [None, ""]:
+        cleaned = clean_text(value)
 
-            cleaned = clean_text(value)
+        if cleaned:
 
-            if cleaned:
+            text_parts.append(
+                cleaned
+            )
 
-                text_parts.append(cleaned)
-
-    return " | ".join(text_parts)
+    return " | ".join(
+        text_parts
+    )
 
 
 # =========================================================
@@ -327,20 +391,25 @@ def build_case_search_text(
 # =========================================================
 
 def extract_matched_keywords(
+
     query_text: str,
+
     searchable_text: str
+
 ) -> List[str]:
 
     query_words = set(
 
-        normalize_text(query_text)
-        .split()
+        normalize_text(
+            query_text
+        ).split()
     )
 
     searchable_words = set(
 
-        normalize_text(searchable_text)
-        .split()
+        normalize_text(
+            searchable_text
+        ).split()
     )
 
     matched = list(
@@ -361,9 +430,13 @@ def extract_matched_keywords(
         if len(word) > 3
     ]
 
-    matched = list(set(matched))
+    matched = list(
+        set(matched)
+    )
 
-    return matched[:MAX_KEYWORDS_RETURN]
+    return matched[
+        :MAX_KEYWORDS_RETURN
+    ]
 
 
 # =========================================================
@@ -371,8 +444,11 @@ def extract_matched_keywords(
 # =========================================================
 
 def apply_keyword_boost(
+
     similarity_score: float,
+
     matched_keywords: List[str]
+
 ) -> float:
 
     boost = min(
@@ -384,12 +460,10 @@ def apply_keyword_boost(
 
     boosted_score = similarity_score + boost
 
-    boosted_score = min(
+    return min(
         boosted_score,
         1.0
     )
-
-    return boosted_score
 
 
 # =========================================================
@@ -416,12 +490,18 @@ def get_confidence_level(
 # =========================================================
 
 def safe_case_value(
+
     case_data: Dict,
+
     field: str,
+
     default="Unknown"
 ):
 
-    value = case_data.get(field, default)
+    value = case_data.get(
+        field,
+        default
+    )
 
     if value in [None, ""]:
 
@@ -438,15 +518,22 @@ def validate_case_record(
     case_data
 ) -> bool:
 
-    if not isinstance(case_data, dict):
+    if not isinstance(
+        case_data,
+        dict
+    ):
 
         return False
 
-    if "embedding" not in case_data:
+    embedding = case_data.get(
+        "embedding"
+    )
+
+    if embedding is None:
 
         return False
 
-    if not case_data.get("embedding"):
+    if len(embedding) == 0:
 
         return False
 
@@ -472,7 +559,11 @@ def generate_query_embedding(
 
     try:
 
-        embedding = embedder.get_embedding(
+        # =============================================
+        # FIXED METHOD NAME
+        # =============================================
+
+        embedding = embedder.generate_embedding(
             query_text
         )
 
@@ -508,11 +599,17 @@ def generate_query_embedding(
 # =========================================================
 
 def build_result_object(
+
     case_data: Dict,
+
     similarity_score: float,
+
     boosted_score: float,
+
     matched_keywords: List[str],
+
     searchable_text: str
+
 ) -> Dict:
 
     return {
@@ -607,112 +704,72 @@ def build_result_object(
 # =========================================================
 
 def retrieve_similar_cases(
+
     query_text: str,
+
     case_database: List[Dict],
+
     top_k: int = 2
+
 ) -> List[Dict]:
 
     start_time = time.time()
 
     log_event(
         "retrieval_started",
-        "Clinical similarity retrieval started",
-        {
-            "query_length":
-                len(query_text)
-                if query_text else 0,
-
-            "database_size":
-                len(case_database)
-                if isinstance(case_database, list)
-                else 0,
-
-            "top_k":
-                top_k
-        }
+        "Clinical similarity retrieval started"
     )
 
     # =====================================================
-    # INPUT VALIDATION
+    # VALIDATION
     # =====================================================
+
+    if not isinstance(
+        query_text,
+        str
+    ):
+
+        return []
+
+    query_text = clean_text(
+        query_text
+    )
 
     if not query_text:
 
-        log_event(
-            "validation_error",
-            "Empty query received"
-        )
-
         return []
 
-    if not isinstance(query_text, str):
-
-        log_event(
-            "validation_error",
-            "Query must be string"
-        )
-
-        return []
-
-    query_text = clean_text(query_text)
-
-    if not query_text.strip():
-
-        log_event(
-            "validation_error",
-            "Query empty after cleaning"
-        )
-
-        return []
-
-    if not isinstance(case_database, list):
-
-        log_event(
-            "validation_error",
-            "Case database invalid"
-        )
+    if not isinstance(
+        case_database,
+        list
+    ):
 
         return []
 
     if len(case_database) == 0:
 
-        log_event(
-            "validation_error",
-            "Case database empty"
-        )
-
         return []
 
-    if not isinstance(top_k, int):
+    if not isinstance(
+        top_k,
+        int
+    ):
 
         top_k = 2
 
-    if top_k <= 0:
-
-        top_k = 2
+    top_k = max(top_k, 1)
 
     # =====================================================
-    # QUERY ENHANCEMENT
+    # ENHANCE QUERY
     # =====================================================
 
     enhanced_query = enhance_query(
         query_text
     )
 
-    log_event(
-        "query_enhanced",
-        "Clinical query enhanced",
-        {
-            "enhanced_query":
-                enhanced_query
-        }
-    )
-
     # =====================================================
     # QUERY EMBEDDING
     # =====================================================
-
-    embedding_start = time.time()
 
     query_embedding = generate_query_embedding(
         enhanced_query
@@ -720,34 +777,7 @@ def retrieve_similar_cases(
 
     if query_embedding is None:
 
-        log_event(
-            "embedding_failure",
-            "Query embedding failed"
-        )
-
         return []
-
-    embedding_time = round(
-
-        (
-            time.time() -
-            embedding_start
-        ) * 1000,
-
-        2
-    )
-
-    log_event(
-        "embedding_generated",
-        "Query embedding generated",
-        {
-            "embedding_dimension":
-                len(query_embedding),
-
-            "embedding_time_ms":
-                embedding_time
-        }
-    )
 
     # =====================================================
     # RETRIEVAL LOOP
@@ -755,27 +785,15 @@ def retrieve_similar_cases(
 
     results = []
 
-    processed_cases = 0
-
-    skipped_cases = 0
-
     for case_data in case_database:
 
         try:
 
-            # ------------------------------------------------
-            # CASE VALIDATION
-            # ------------------------------------------------
-
-            if not validate_case_record(case_data):
-
-                skipped_cases += 1
+            if not validate_case_record(
+                case_data
+            ):
 
                 continue
-
-            # ------------------------------------------------
-            # LOAD CASE EMBEDDING
-            # ------------------------------------------------
 
             case_embedding = normalize_embedding(
 
@@ -787,93 +805,65 @@ def retrieve_similar_cases(
 
             if case_embedding.size == 0:
 
-                skipped_cases += 1
-
                 continue
-
-            # ------------------------------------------------
-            # DIMENSION VALIDATION
-            # ------------------------------------------------
 
             if len(query_embedding) != len(case_embedding):
 
-                skipped_cases += 1
-
                 continue
 
-            # ------------------------------------------------
-            # SEMANTIC SIMILARITY
-            # ------------------------------------------------
-
             similarity_score = cosine_similarity(
+
                 query_embedding,
+
                 case_embedding
             )
 
-            # ------------------------------------------------
-            # SEARCHABLE TEXT
-            # ------------------------------------------------
-
             searchable_text = (
+
                 build_case_search_text(
                     case_data
                 )
             )
 
-            # ------------------------------------------------
-            # KEYWORD MATCHING
-            # ------------------------------------------------
-
             matched_keywords = (
+
                 extract_matched_keywords(
+
                     enhanced_query,
+
                     searchable_text
                 )
             )
 
-            # ------------------------------------------------
-            # SCORE BOOSTING
-            # ------------------------------------------------
-
             boosted_score = apply_keyword_boost(
+
                 similarity_score,
+
                 matched_keywords
             )
-
-            # ------------------------------------------------
-            # THRESHOLD FILTER
-            # ------------------------------------------------
 
             if boosted_score < MIN_SIMILARITY_THRESHOLD:
 
                 continue
 
-            # ------------------------------------------------
-            # BUILD RESULT
-            # ------------------------------------------------
-
             result_object = build_result_object(
 
-                case_data=case_data,
+                case_data,
 
-                similarity_score=similarity_score,
+                similarity_score,
 
-                boosted_score=boosted_score,
+                boosted_score,
 
-                matched_keywords=matched_keywords,
+                matched_keywords,
 
-                searchable_text=searchable_text
+                searchable_text
             )
 
             results.append(
                 result_object
             )
 
-            processed_cases += 1
-
         except Exception as e:
-
-            skipped_cases += 1
 
             log_event(
                 "case_processing_error",
@@ -888,47 +878,20 @@ def retrieve_similar_cases(
             continue
 
     # =====================================================
-    # NO RESULTS
-    # =====================================================
-
-    if len(results) == 0:
-
-        log_event(
-            "no_results",
-            "No similar clinical cases found"
-        )
-
-        return []
-
-    # =====================================================
     # SORT RESULTS
     # =====================================================
 
-    try:
+    results = sorted(
 
-        results = sorted(
+        results,
 
-            results,
+        key=lambda x:
+            x["similarity"],
 
-            key=lambda x:
-                x["similarity"],
+        reverse=True
+    )
 
-            reverse=True
-        )
-
-        top_results = results[:top_k]
-
-    except Exception as e:
-
-        log_event(
-            "sorting_error",
-            "Result sorting failed",
-            {
-                "error": str(e)
-            }
-        )
-
-        return []
+    top_results = results[:top_k]
 
     # =====================================================
     # FINAL LOGGING
@@ -948,26 +911,8 @@ def retrieve_similar_cases(
         "retrieval_completed",
         "Clinical retrieval completed successfully",
         {
-            "processed_cases":
-                processed_cases,
-
-            "skipped_cases":
-                skipped_cases,
-
             "returned_cases":
                 len(top_results),
-
-            "top_case_ids":
-                [
-                    result["case_id"]
-                    for result in top_results
-                ],
-
-            "top_scores":
-                [
-                    result["similarity"]
-                    for result in top_results
-                ],
 
             "total_time_ms":
                 total_time

@@ -1,10 +1,22 @@
+# =========================================================
+# IMPORTS
+# =========================================================
+
 import logging
+
 import json
+
 import time
+
+import numpy as np
+
 from datetime import datetime
+
 from typing import List, Dict, Any
 
+
 from retrieval.database import collection
+
 from retrieval.embedding import BioBERTEmbedding
 
 from config import EMBEDDING_VERSION
@@ -15,8 +27,11 @@ from config import EMBEDDING_VERSION
 # =========================================================
 
 logging.basicConfig(
+
     level=logging.INFO,
+
     format="%(message)s",
+
     force=True
 )
 
@@ -32,10 +47,17 @@ try:
     embedder = BioBERTEmbedding()
 
     logger.info(
+
         json.dumps({
-            "event": "embedder_initialized",
-            "message": "BioBERTEmbedding initialized successfully",
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+
+            "event":
+                "embedder_initialized",
+
+            "message":
+                "BioBERTEmbedding initialized successfully",
+
+            "timestamp":
+                time.strftime("%Y-%m-%d %H:%M:%S")
         })
     )
 
@@ -44,10 +66,17 @@ except Exception as e:
     embedder = None
 
     logger.error(
+
         json.dumps({
-            "event": "embedder_initialization_failed",
-            "error": str(e),
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+
+            "event":
+                "embedder_initialization_failed",
+
+            "error":
+                str(e),
+
+            "timestamp":
+                time.strftime("%Y-%m-%d %H:%M:%S")
         })
     )
 
@@ -56,18 +85,34 @@ except Exception as e:
 # LOGGING HELPER
 # =========================================================
 
-def log_event(event_type, message, extra=None):
+def log_event(
+
+    event_type,
+
+    message,
+
+    extra=None
+):
 
     log_data = {
-        "event": event_type,
-        "message": message,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+
+        "event":
+            event_type,
+
+        "message":
+            message,
+
+        "timestamp":
+            time.strftime("%Y-%m-%d %H:%M:%S")
     }
 
     if extra:
+
         log_data.update(extra)
 
-    logger.info(json.dumps(log_data))
+    logger.info(
+        json.dumps(log_data)
+    )
 
 
 # =========================================================
@@ -77,13 +122,16 @@ def log_event(event_type, message, extra=None):
 def clean_text(text):
 
     if text is None:
+
         return ""
 
     text = str(text)
 
     text = text.strip()
 
-    text = " ".join(text.split())
+    text = " ".join(
+        text.split()
+    )
 
     return text
 
@@ -92,18 +140,30 @@ def clean_text(text):
 # SAFE FIELD EXTRACTION
 # =========================================================
 
-def safe_field(record, field_name, default=""):
+def safe_field(
+
+    record,
+
+    field_name,
+
+    default=""
+):
 
     try:
 
-        value = record.get(field_name, default)
+        value = record.get(
+            field_name,
+            default
+        )
 
         if value in [None, "", [], {}]:
+
             return default
 
         return clean_text(value)
 
     except Exception:
+
         return default
 
 
@@ -111,82 +171,144 @@ def safe_field(record, field_name, default=""):
 # BUILD CLINICAL TEXT
 # =========================================================
 
-def build_clinical_text(record: Dict[str, Any]) -> str:
+def build_clinical_text(
+
+    record: Dict[str, Any]
+
+) -> str:
 
     text_parts = [
 
-        # -------------------------------------------------
-        # PRIMARY CLINICAL FIELDS
-        # -------------------------------------------------
+        safe_field(
+            record,
+            "chief_complaint"
+        ),
 
-        safe_field(record, "chief_complaint"),
+        safe_field(
+            record,
+            "affected_body_part"
+        ),
 
-        safe_field(record, "affected_body_part"),
+        safe_field(
+            record,
+            "symptoms"
+        ),
 
-        safe_field(record, "symptoms"),
+        safe_field(
+            record,
+            "diagnosis"
+        ),
 
-        safe_field(record, "diagnosis"),
+        safe_field(
+            record,
+            "subjective_assessment"
+        ),
 
-        safe_field(record, "subjective_assessment"),
+        safe_field(
+            record,
+            "functional_assessment"
+        ),
 
-        safe_field(record, "functional_assessment"),
+        safe_field(
+            record,
+            "physical_examination"
+        ),
 
-        safe_field(record, "physical_examination"),
+        safe_field(
+            record,
+            "objective_findings"
+        ),
 
-        safe_field(record, "objective_findings"),
+        safe_field(
+            record,
+            "patient_pain_classification"
+        ),
 
-        safe_field(record, "patient_pain_classification"),
+        safe_field(
+            record,
+            "clinical_history"
+        ),
 
-        safe_field(record, "clinical_history"),
+        safe_field(
+            record,
+            "doctor_notes"
+        ),
 
-        safe_field(record, "doctor_notes"),
+        safe_field(
+            record,
+            "previous_injuries"
+        ),
 
-        safe_field(record, "previous_injuries"),
+        safe_field(
+            record,
+            "current_medications"
+        ),
 
-        safe_field(record, "current_medications"),
+        safe_field(
+            record,
+            "allergies"
+        ),
 
-        safe_field(record, "allergies"),
+        safe_field(
+            record,
+            "symptoms_duration"
+        ),
 
-        safe_field(record, "symptoms_duration"),
+        safe_field(
+            record,
+            "resolution_notes"
+        ),
 
-        safe_field(record, "resolution_notes"),
-
-        safe_field(record, "case_description")
+        safe_field(
+            record,
+            "case_description"
+        )
     ]
 
     filtered_parts = [
 
         part
+
         for part in text_parts
+
         if part not in [None, ""]
     ]
 
-    return " | ".join(filtered_parts)
+    return " | ".join(
+        filtered_parts
+    )
 
 
 # =========================================================
 # VALIDATE EMBEDDING
 # =========================================================
 
-def validate_embedding(embedding):
-
-    if embedding is None:
-        return False
+def validate_embedding(
+    embedding
+):
 
     try:
 
-        if hasattr(embedding, "tolist"):
-            embedding = embedding.tolist()
+        if embedding is None:
 
-        if not isinstance(embedding, list):
             return False
 
-        if len(embedding) == 0:
+        embedding = np.array(
+            embedding
+        )
+
+        if embedding.size == 0:
+
+            return False
+
+        if len(embedding.shape) != 1:
+
             return False
 
         return True
 
     except Exception:
+
         return False
 
 
@@ -196,9 +318,9 @@ def validate_embedding(embedding):
 
 def generate_and_store_embeddings():
 
-    # -----------------------------------------------------
+    # =====================================================
     # EMBEDDER CHECK
-    # -----------------------------------------------------
+    # =====================================================
 
     if embedder is None:
 
@@ -209,9 +331,9 @@ def generate_and_store_embeddings():
 
         return
 
-    # -----------------------------------------------------
+    # =====================================================
     # DATABASE CHECK
-    # -----------------------------------------------------
+    # =====================================================
 
     if collection is None:
 
@@ -222,15 +344,19 @@ def generate_and_store_embeddings():
 
         return
 
-    # -----------------------------------------------------
+    # =====================================================
     # FETCH RECORDS
-    # -----------------------------------------------------
+    # =====================================================
 
     try:
 
-        records = list(collection.find({}))
+        records = list(
+            collection.find({})
+        )
 
-        total_records = len(records)
+        total_records = len(
+            records
+        )
 
     except Exception as e:
 
@@ -238,15 +364,16 @@ def generate_and_store_embeddings():
             "database_error",
             "Failed to fetch records",
             {
-                "error": str(e)
+                "error":
+                    str(e)
             }
         )
 
         return
 
-    # -----------------------------------------------------
+    # =====================================================
     # COUNTERS
-    # -----------------------------------------------------
+    # =====================================================
 
     processed = 0
 
@@ -258,16 +385,22 @@ def generate_and_store_embeddings():
 
     start_time = time.time()
 
-    # -----------------------------------------------------
+    # =====================================================
     # START LOG
-    # -----------------------------------------------------
+    # =====================================================
 
     log_event(
+
         "embedding_generation_started",
+
         "Clinical embedding generation started",
+
         {
-            "total_records": total_records,
-            "embedding_version": EMBEDDING_VERSION
+            "total_records":
+                total_records,
+
+            "embedding_version":
+                EMBEDDING_VERSION
         }
     )
 
@@ -280,15 +413,16 @@ def generate_and_store_embeddings():
         try:
 
             case_id = str(
+
                 record.get(
                     "case_id",
                     "Unknown"
                 )
             )
 
-            # -------------------------------------------------
+            # ------------------------------------------------
             # SKIP EXISTING EMBEDDINGS
-            # -------------------------------------------------
+            # ------------------------------------------------
 
             existing_embedding = record.get(
                 "embedding",
@@ -301,79 +435,103 @@ def generate_and_store_embeddings():
             )
 
             if (
-                validate_embedding(existing_embedding)
-                and existing_version == EMBEDDING_VERSION
+
+                validate_embedding(
+                    existing_embedding
+                )
+
+                and
+
+                existing_version == EMBEDDING_VERSION
             ):
 
                 skipped += 1
 
                 continue
 
-            # -------------------------------------------------
+            # ------------------------------------------------
             # BUILD SEARCHABLE TEXT
-            # -------------------------------------------------
+            # ------------------------------------------------
 
-            text = build_clinical_text(record)
+            text = build_clinical_text(
+                record
+            )
 
             if not text:
+
+                skipped += 1
 
                 log_event(
                     "empty_text_skipped",
                     "Empty clinical text skipped",
                     {
-                        "case_id": case_id
+                        "case_id":
+                            case_id
                     }
                 )
 
-                skipped += 1
-
                 continue
 
-            # -------------------------------------------------
+            # ------------------------------------------------
             # GENERATE EMBEDDING
-            # -------------------------------------------------
+            # ------------------------------------------------
 
             embedding_start = time.time()
 
-            embedding = embedder.get_embedding(text)
+            # =============================================
+            # FIXED METHOD NAME
+            # =============================================
+
+            embedding = embedder.generate_embedding(
+                text
+            )
 
             embedding_time = round(
+
                 (
                     time.time() -
                     embedding_start
                 ) * 1000,
+
                 2
             )
 
-            if not validate_embedding(embedding):
+            if not validate_embedding(
+                embedding
+            ):
+
+                errors += 1
 
                 log_event(
                     "embedding_failed",
                     "Embedding generation failed",
                     {
-                        "case_id": case_id
+                        "case_id":
+                            case_id
                     }
                 )
 
-                errors += 1
-
                 continue
 
-            # -------------------------------------------------
+            # ------------------------------------------------
             # CONVERT TO LIST
-            # -------------------------------------------------
+            # ------------------------------------------------
 
-            if hasattr(embedding, "tolist"):
+            embedding = np.array(
+                embedding,
+                dtype=np.float32
+            ).tolist()
 
-                embedding = embedding.tolist()
-
-            # -------------------------------------------------
+            # ------------------------------------------------
             # STORE IN DATABASE
-            # -------------------------------------------------
+            # ------------------------------------------------
 
             update_result = collection.update_one(
 
-                {"case_id": case_id},
+                {
+                    "case_id":
+                        case_id
+                },
 
                 {
                     "$set": {
@@ -394,7 +552,7 @@ def generate_and_store_embeddings():
                             datetime.utcnow(),
 
                         "embedding_model":
-                            "BioClinicalBERT",
+                            "BioBERT",
 
                         "embedding_domain":
                             "Clinical",
@@ -405,28 +563,34 @@ def generate_and_store_embeddings():
                 }
             )
 
-            # -------------------------------------------------
-            # COUNTERS
-            # -------------------------------------------------
-
             processed += 1
 
             if update_result.modified_count > 0:
 
                 updated += 1
 
-            # -------------------------------------------------
+            # ------------------------------------------------
             # SUCCESS LOG
-            # -------------------------------------------------
+            # ------------------------------------------------
 
             log_event(
+
                 "embedding_stored",
+
                 "Clinical embedding stored successfully",
+
                 {
-                    "case_id": case_id,
-                    "embedding_dimension": len(embedding),
-                    "embedding_time_ms": embedding_time,
-                    "processed": processed
+                    "case_id":
+                        case_id,
+
+                    "embedding_dimension":
+                        len(embedding),
+
+                    "embedding_time_ms":
+                        embedding_time,
+
+                    "processed":
+                        processed
                 }
             )
 
@@ -439,8 +603,11 @@ def generate_and_store_embeddings():
             errors += 1
 
             log_event(
+
                 "record_processing_error",
+
                 "Error processing clinical case",
+
                 {
                     "case_id":
                         record.get(
@@ -460,33 +627,45 @@ def generate_and_store_embeddings():
     # =====================================================
 
     total_time = round(
+
         (
             time.time() -
             start_time
         ) * 1000,
+
         2
     )
 
     summary = {
 
-        "processed": processed,
+        "processed":
+            processed,
 
-        "updated": updated,
+        "updated":
+            updated,
 
-        "skipped": skipped,
+        "skipped":
+            skipped,
 
-        "errors": errors,
+        "errors":
+            errors,
 
-        "total_records": total_records,
+        "total_records":
+            total_records,
 
-        "total_time_ms": total_time,
+        "total_time_ms":
+            total_time,
 
-        "embedding_version": EMBEDDING_VERSION
+        "embedding_version":
+            EMBEDDING_VERSION
     }
 
     log_event(
+
         "embedding_generation_completed",
+
         "Clinical embedding generation completed",
+
         summary
     )
 
@@ -495,16 +674,40 @@ def generate_and_store_embeddings():
     # =====================================================
 
     print("\n=================================================")
-    print("CLINICAL EMBEDDING GENERATION COMPLETED")
+
+    print(
+        "CLINICAL EMBEDDING GENERATION COMPLETED"
+    )
+
     print("=================================================")
 
-    print(f"Total Records       : {total_records}")
-    print(f"Processed           : {processed}")
-    print(f"Updated             : {updated}")
-    print(f"Skipped             : {skipped}")
-    print(f"Errors              : {errors}")
-    print(f"Embedding Version   : {EMBEDDING_VERSION}")
-    print(f"Time Taken (ms)     : {total_time}")
+    print(
+        f"Total Records       : {total_records}"
+    )
+
+    print(
+        f"Processed           : {processed}"
+    )
+
+    print(
+        f"Updated             : {updated}"
+    )
+
+    print(
+        f"Skipped             : {skipped}"
+    )
+
+    print(
+        f"Errors              : {errors}"
+    )
+
+    print(
+        f"Embedding Version   : {EMBEDDING_VERSION}"
+    )
+
+    print(
+        f"Time Taken (ms)     : {total_time}"
+    )
 
     print("=================================================\n")
 

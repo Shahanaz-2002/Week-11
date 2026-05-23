@@ -3,28 +3,53 @@
 # =========================================================
 
 import time
+
 import traceback
+
 from fastapi import HTTPException
 
-from retrieval.retrieval_engine import retrieve_similar_cases
-from retrieval.database import fetch_case_database
+from retrieval.retrieval_engine import (
+    retrieve_similar_cases
+)
+
+from retrieval.database import (
+    fetch_case_database
+)
 
 from config import TOP_K
 
 
-try:
-    case_database = fetch_case_database()
-except Exception:
-    case_database = []
-
+# =========================================================
+# SAFE TEXT
+# =========================================================
 
 def safe_text(value):
 
     if value in [None, "", [], {}]:
+
         return ""
 
     return str(value).strip()
 
+
+# =========================================================
+# SAFE ATTRIBUTE ACCESS
+# =========================================================
+
+def safe_attr(obj, field):
+
+    try:
+
+        return getattr(obj, field, "")
+
+    except Exception:
+
+        return ""
+
+
+# =========================================================
+# BUILD SEARCH QUERY
+# =========================================================
 
 def build_search_query(request):
 
@@ -32,17 +57,35 @@ def build_search_query(request):
 
     weighted_fields = [
 
-        request.skin_condition,
-        request.affected_skin_area,
-        request.symptoms,
-        request.skin_type,
-        request.subjective_assessment,
-        request.physical_examination,
-        request.objective_findings,
-        request.previous_skin_conditions,
-        request.allergies,
-        request.doctor_notes,
-        request.clinical_history
+        safe_attr(request, "skin_condition"),
+
+        safe_attr(request, "affected_skin_area"),
+
+        safe_attr(request, "symptoms"),
+
+        safe_attr(request, "skin_type"),
+
+        safe_attr(request, "subjective_assessment"),
+
+        safe_attr(request, "physical_examination"),
+
+        safe_attr(request, "objective_findings"),
+
+        safe_attr(request, "previous_skin_conditions"),
+
+        safe_attr(request, "allergies"),
+
+        safe_attr(request, "doctor_notes"),
+
+        safe_attr(request, "clinical_history"),
+
+        # ============================================
+        # SUPPORT GENERIC CLINICAL FIELDS
+        # ============================================
+
+        safe_attr(request, "chief_complaint"),
+
+        safe_attr(request, "affected_body_part")
     ]
 
     for field in weighted_fields:
@@ -50,10 +93,15 @@ def build_search_query(request):
         cleaned = safe_text(field)
 
         if cleaned:
+
             query_parts.append(cleaned)
 
     return " | ".join(query_parts).strip()
 
+
+# =========================================================
+# BUILD CONTEXT
+# =========================================================
 
 def build_dermatology_context(request):
 
@@ -61,22 +109,32 @@ def build_dermatology_context(request):
 
     field_mapping = {
 
-        "Age": request.age,
-        "Gender": request.gender,
-        "Skin Type": request.skin_type,
-        "Occupation": request.occupation,
-        "Skin Condition": request.skin_condition,
-        "Affected Skin Area": request.affected_skin_area,
-        "Symptoms Duration": request.symptoms_duration,
-        "Previous Skin Conditions": request.previous_skin_conditions,
-        "Current Medications": request.current_medications,
-        "Allergies": request.allergies,
-        "Symptoms": request.symptoms,
-        "Physical Examination": request.physical_examination,
-        "Objective Findings": request.objective_findings,
-        "Doctor Notes": request.doctor_notes,
-        "Clinical History": request.clinical_history,
-        "Doctor Name": request.doctor_name
+        "Age":
+            safe_attr(request, "age"),
+
+        "Gender":
+            safe_attr(request, "gender"),
+
+        "Skin Type":
+            safe_attr(request, "skin_type"),
+
+        "Occupation":
+            safe_attr(request, "occupation"),
+
+        "Skin Condition":
+            safe_attr(request, "skin_condition"),
+
+        "Affected Skin Area":
+            safe_attr(request, "affected_skin_area"),
+
+        "Symptoms":
+            safe_attr(request, "symptoms"),
+
+        "Doctor Notes":
+            safe_attr(request, "doctor_notes"),
+
+        "Clinical History":
+            safe_attr(request, "clinical_history")
     }
 
     for field_name, value in field_mapping.items():
@@ -92,164 +150,160 @@ def build_dermatology_context(request):
     return "\n".join(context_parts)
 
 
+# =========================================================
+# GENERATE RECOMMENDATIONS
+# =========================================================
+
 def generate_recommendations(case):
 
     recommendations = {
 
         "recommended_tests": [],
+
         "recommended_medicines": [],
+
         "skincare_plan": [],
+
         "precautions": []
     }
 
     combined_text = (
 
         safe_text(case.get("skin_condition")) +
+
         " " +
+
         safe_text(case.get("symptoms")) +
+
         " " +
+
         safe_text(case.get("doctor_notes"))
 
     ).lower()
 
+    # =====================================================
+    # ACNE
+    # =====================================================
+
     if "acne" in combined_text:
 
         recommendations["recommended_tests"] = [
+
             "Dermatoscopy",
+
             "Hormonal Evaluation"
         ]
 
         recommendations["recommended_medicines"] = [
+
             "Benzoyl Peroxide",
+
             "Topical Retinoid"
         ]
 
-        recommendations["skincare_plan"] = [
-            "Use oil-free cleanser",
-            "Avoid comedogenic cosmetics"
-        ]
-
-        recommendations["precautions"] = [
-            "Avoid touching pimples",
-            "Use sunscreen daily"
-        ]
+    # =====================================================
+    # ECZEMA
+    # =====================================================
 
     elif "eczema" in combined_text:
 
         recommendations["recommended_tests"] = [
+
             "Patch Allergy Test"
         ]
 
         recommendations["recommended_medicines"] = [
+
             "Topical Corticosteroid",
+
             "Moisturizer"
         ]
 
-        recommendations["skincare_plan"] = [
-            "Use fragrance-free moisturizer",
-            "Hydrate skin regularly"
-        ]
-
-        recommendations["precautions"] = [
-            "Avoid harsh soaps",
-            "Avoid allergens"
-        ]
+    # =====================================================
+    # PSORIASIS
+    # =====================================================
 
     elif "psoriasis" in combined_text:
 
         recommendations["recommended_tests"] = [
+
             "Skin Biopsy"
         ]
 
         recommendations["recommended_medicines"] = [
-            "Topical Steroids",
-            "Vitamin D Analogues"
+
+            "Topical Steroids"
         ]
 
-        recommendations["skincare_plan"] = [
-            "Keep skin moisturized",
-            "Use medicated shampoo if scalp affected"
-        ]
-
-        recommendations["precautions"] = [
-            "Avoid smoking",
-            "Reduce stress"
-        ]
-
-    elif "fungal" in combined_text:
-
-        recommendations["recommended_tests"] = [
-            "KOH Test",
-            "Fungal Culture"
-        ]
-
-        recommendations["recommended_medicines"] = [
-            "Clotrimazole",
-            "Terbinafine"
-        ]
-
-        recommendations["skincare_plan"] = [
-            "Keep affected area dry"
-        ]
-
-        recommendations["precautions"] = [
-            "Avoid sharing towels",
-            "Maintain hygiene"
-        ]
+    # =====================================================
+    # FALLBACK
+    # =====================================================
 
     else:
 
         recommendations["recommended_tests"] = [
+
             "Dermatology Consultation"
         ]
 
         recommendations["recommended_medicines"] = [
+
             "Symptomatic Skin Care"
         ]
 
     return recommendations
 
 
+# =========================================================
+# CONFIDENCE
+# =========================================================
+
 def get_confidence_level(score):
 
     if score >= 0.85:
+
         return "High"
 
     elif score >= 0.60:
+
         return "Moderate"
 
     return "Low"
 
 
+# =========================================================
+# GENERATE MATCH REASON
+# =========================================================
+
 def generate_similarity_reason(case):
 
     keywords = []
 
-    condition = safe_text(
-        case.get("skin_condition")
-    )
+    for field in [
 
-    area = safe_text(
-        case.get("affected_skin_area")
-    )
+        "skin_condition",
 
-    findings = safe_text(
-        case.get("objective_findings")
-    )
+        "affected_skin_area",
 
-    if condition:
-        keywords.append(condition)
+        "objective_findings",
 
-    if area:
-        keywords.append(area)
+        "chief_complaint",
 
-    if findings:
-        keywords.append(findings)
+        "affected_body_part"
+    ]:
 
-    if len(keywords) == 0:
+        value = safe_text(
+            case.get(field)
+        )
+
+        if value:
+
+            keywords.append(value)
+
+    if not keywords:
 
         return (
-            "Matched using semantic dermatology similarity"
+            "Matched using semantic similarity"
         )
 
     return (
@@ -258,19 +312,25 @@ def generate_similarity_reason(case):
     )
 
 
+# =========================================================
+# SANITIZE MATCH
+# =========================================================
+
 def sanitize_match(case):
 
     similarity_score = round(
+
         float(case.get("similarity", 0.0)),
+
         4
     )
 
     similarity_score = max(
+
         0.0,
+
         min(1.0, similarity_score)
     )
-
-    recommendations = generate_recommendations(case)
 
     return {
 
@@ -283,47 +343,48 @@ def sanitize_match(case):
         "confidence_level":
             get_confidence_level(similarity_score),
 
-        "skin_condition":
-            case.get("skin_condition", "Unknown"),
-
-        "affected_skin_area":
-            case.get("affected_skin_area", "Unknown"),
-
-        "symptoms_duration":
-            case.get("symptoms_duration", "Unknown"),
-
-        "doctor_notes":
-            case.get(
-                "doctor_notes",
-                "No notes available"
-            ),
-
         "matched_keywords":
-            case.get(
-                "matched_keywords",
-                []
-            ),
+            case.get("matched_keywords", []),
 
         "semantic_score":
             similarity_score,
 
         "retrieval_source":
-            "BioBERT Dermatology Retrieval",
+            "BioBERT Clinical Retrieval",
 
         "explanation":
             generate_similarity_reason(case),
 
-        "recommendation": recommendations
+        "recommendation":
+            generate_recommendations(case),
+
+        # ============================================
+        # RETURN RAW CASE TOO
+        # ============================================
+
+        "case_data":
+            case
     }
 
 
-def dermatology_match_pipeline(
+# =========================================================
+# MAIN PIPELINE
+# =========================================================
+
+def clinical_match_pipeline(
+
     request,
+
     request_id,
+
     search_query="",
+
     generated_context="",
+
     combined_symptoms="",
+
     patient_metadata=None,
+
     log_event=None
 ):
 
@@ -331,15 +392,27 @@ def dermatology_match_pipeline(
 
     try:
 
+        # =================================================
+        # FETCH DATABASE DYNAMICALLY
+        # =================================================
+
+        case_database = fetch_case_database()
+
         if not isinstance(case_database, list):
 
             raise HTTPException(
+
                 status_code=500,
+
                 detail={
                     "status": "Failed",
                     "message": "Invalid case database"
                 }
             )
+
+        # =================================================
+        # BUILD SEARCH QUERY
+        # =================================================
 
         if not search_query:
 
@@ -349,61 +422,94 @@ def dermatology_match_pipeline(
 
         if not generated_context:
 
-            generated_context = build_dermatology_context(
-                request
+            generated_context = (
+                build_dermatology_context(
+                    request
+                )
             )
 
         if not combined_symptoms:
 
             combined_symptoms = " ".join([
 
-                safe_text(request.skin_condition),
-                safe_text(request.symptoms),
-                safe_text(request.objective_findings)
+                safe_text(
+                    safe_attr(request, "skin_condition")
+                ),
 
+                safe_text(
+                    safe_attr(request, "symptoms")
+                ),
+
+                safe_text(
+                    safe_attr(request, "objective_findings")
+                )
             ]).strip()
 
         if not search_query.strip():
 
             raise HTTPException(
+
                 status_code=400,
+
                 detail={
                     "error": "Invalid Input",
                     "message": "Search query empty"
                 }
             )
 
+        # =================================================
+        # RETRIEVE CASES
+        # =================================================
+
         retrieved_cases = retrieve_similar_cases(
 
             query_text=search_query,
+
             case_database=case_database,
+
             top_k=max(TOP_K, 2)
         )
+
+        # =================================================
+        # NO MATCH
+        # =================================================
 
         if not retrieved_cases:
 
             return {
 
-                "status": "No Match",
-                "message": "No similar dermatology cases found",
-                "matches": [],
-                "total_matches_found": 0,
-                "confidence_score": 0.0,
-                "generated_context": generated_context,
-                "search_query": search_query,
-                "processing_time_ms": round(
-                    (time.time() - start_time) * 1000,
-                    2
-                )
+                "status":
+                    "No Match",
+
+                "message":
+                    "No similar cases found",
+
+                "matches":
+                    [],
+
+                "total_matches_found":
+                    0,
+
+                "confidence_score":
+                    0.0,
+
+                "generated_context":
+                    generated_context,
+
+                "search_query":
+                    search_query
             }
 
-        formatted_matches = []
+        # =================================================
+        # FORMAT RESULTS
+        # =================================================
 
-        for case in retrieved_cases[:2]:
+        formatted_matches = [
 
-            formatted_matches.append(
-                sanitize_match(case)
-            )
+            sanitize_match(case)
+
+            for case in retrieved_cases[:2]
+        ]
 
         confidence_score = round(
 
@@ -417,10 +523,11 @@ def dermatology_match_pipeline(
 
         return {
 
-            "status": "Success",
+            "status":
+                "Success",
 
             "message":
-                "Top dermatology matches retrieved successfully",
+                "Clinical matches retrieved successfully",
 
             "matches":
                 formatted_matches,
@@ -439,15 +546,19 @@ def dermatology_match_pipeline(
 
             "processing_time_ms":
                 round(
-                    (time.time() - start_time) * 1000,
+                    (
+                        time.time() -
+                        start_time
+                    ) * 1000,
                     2
                 ),
 
             "explanation":
-                "AI-powered dermatology semantic retrieval completed"
+                "AI-powered semantic retrieval completed"
         }
 
     except HTTPException:
+
         raise
 
     except Exception as e:
@@ -455,12 +566,19 @@ def dermatology_match_pipeline(
         if log_event:
 
             log_event(
+
                 "pipeline_error",
+
                 request_id,
-                "Dermatology pipeline failure",
+
+                "Clinical pipeline failure",
+
                 {
-                    "error": str(e),
-                    "traceback": traceback.format_exc()
+                    "error":
+                        str(e),
+
+                    "traceback":
+                        traceback.format_exc()
                 }
             )
 
@@ -470,15 +588,19 @@ def dermatology_match_pipeline(
 
             detail={
 
-                "status": "Failed",
+                "status":
+                    "Failed",
 
                 "message":
-                    "Dermatology pipeline execution failed",
+                    "Pipeline execution failed",
 
-                "matches": [],
+                "matches":
+                    [],
 
-                "confidence_score": 0.0,
+                "confidence_score":
+                    0.0,
 
-                "explanation": str(e)
+                "explanation":
+                    str(e)
             }
         )

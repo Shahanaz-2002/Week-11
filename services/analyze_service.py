@@ -1,6 +1,11 @@
+# =========================================================
+# services/analyze_service.py
+# =========================================================
+
 import time
 import traceback
 import re
+import logging
 from typing import Dict, List, Any
 
 from fastapi import HTTPException
@@ -8,7 +13,27 @@ from fastapi import HTTPException
 from retrieval.retrieval_engine import retrieve_similar_cases
 from retrieval.database import fetch_case_database
 
-from config import TOP_K
+from config import (
+    TOP_K,
+    MAX_MATCH_RESULTS,
+    VERY_HIGH_CONFIDENCE,
+    HIGH_CONFIDENCE,
+    MEDIUM_CONFIDENCE,
+    DEFAULT_RECOMMENDED_TESTS,
+    DEFAULT_RECOMMENDED_MEDICINES
+)
+
+# =========================================================
+# LOGGER CONFIGURATION
+# =========================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    force=True
+)
+
+logger = logging.getLogger(__name__)
 
 
 # =========================================================
@@ -23,7 +48,11 @@ try:
 
         case_database = []
 
-except Exception:
+except Exception as e:
+
+    logger.error(
+        f"Failed to load case database: {str(e)}"
+    )
 
     case_database = []
 
@@ -51,6 +80,8 @@ def normalize_text(text: str) -> str:
 
     text = re.sub(r"\s+", " ", text)
 
+    text = re.sub(r"[^\w\s|,-]", " ", text)
+
     return text.strip()
 
 
@@ -66,7 +97,9 @@ def remove_duplicates(values: List[str]) -> List[str]:
 
     for value in values:
 
-        normalized = normalize_text(value).lower()
+        normalized = normalize_text(
+            value
+        ).lower()
 
         if normalized and normalized not in seen:
 
@@ -78,7 +111,6 @@ def remove_duplicates(values: List[str]) -> List[str]:
 
 
 # =========================================================
-# HELPER FUNCTION:
 # BUILD SEARCH QUERY
 # =========================================================
 
@@ -88,17 +120,27 @@ def build_search_query(request) -> str:
 
     weighted_fields = [
 
-        request.chief_complaint,
-        request.affected_body_part,
-        request.symptoms,
-        request.subjective_assessment,
-        request.physical_examination,
-        request.objective_findings,
-        request.patient_pain_classification,
-        request.previous_injuries,
-        request.functional_assessment,
-        request.doctor_notes,
-        request.clinical_history
+        getattr(request, "chief_complaint", ""),
+
+        getattr(request, "affected_body_part", ""),
+
+        getattr(request, "symptoms", ""),
+
+        getattr(request, "subjective_assessment", ""),
+
+        getattr(request, "physical_examination", ""),
+
+        getattr(request, "objective_findings", ""),
+
+        getattr(request, "patient_pain_classification", ""),
+
+        getattr(request, "previous_injuries", ""),
+
+        getattr(request, "functional_assessment", ""),
+
+        getattr(request, "doctor_notes", ""),
+
+        getattr(request, "clinical_history", "")
     ]
 
     for field in weighted_fields:
@@ -115,7 +157,6 @@ def build_search_query(request) -> str:
 
 
 # =========================================================
-# HELPER FUNCTION:
 # BUILD CLINICAL CONTEXT
 # =========================================================
 
@@ -125,25 +166,66 @@ def build_clinical_context(request) -> str:
 
     field_mapping = {
 
-        "Age": request.age,
-        "Gender": request.gender,
-        "Occupation": request.occupation,
-        "Activity Levels": request.activity_levels,
-        "Chief Complaint": request.chief_complaint,
-        "Affected Body Part": request.affected_body_part,
-        "Symptoms Duration": request.symptoms_duration,
-        "Previous Injuries": request.previous_injuries,
-        "Current Medications": request.current_medications,
-        "Allergies": request.allergies,
-        "Subjective Assessment": request.subjective_assessment,
-        "Functional Assessment": request.functional_assessment,
-        "Physical Examination": request.physical_examination,
-        "Objective Findings": request.objective_findings,
-        "Pain Classification": request.patient_pain_classification,
-        "Symptoms": request.symptoms,
-        "Doctor Notes": request.doctor_notes,
-        "Clinical History": request.clinical_history,
-        "Doctor Name": request.doctor_name
+        "Age":
+            getattr(request, "age", ""),
+
+        "Gender":
+            getattr(request, "gender", ""),
+
+        "Occupation":
+            getattr(request, "occupation", ""),
+
+        "Activity Levels":
+            getattr(request, "activity_levels", ""),
+
+        "Chief Complaint":
+            getattr(request, "chief_complaint", ""),
+
+        "Affected Body Part":
+            getattr(request, "affected_body_part", ""),
+
+        "Symptoms Duration":
+            getattr(request, "symptoms_duration", ""),
+
+        "Previous Injuries":
+            getattr(request, "previous_injuries", ""),
+
+        "Current Medications":
+            getattr(request, "current_medications", ""),
+
+        "Allergies":
+            getattr(request, "allergies", ""),
+
+        "Subjective Assessment":
+            getattr(request, "subjective_assessment", ""),
+
+        "Functional Assessment":
+            getattr(request, "functional_assessment", ""),
+
+        "Physical Examination":
+            getattr(request, "physical_examination", ""),
+
+        "Objective Findings":
+            getattr(request, "objective_findings", ""),
+
+        "Pain Classification":
+            getattr(
+                request,
+                "patient_pain_classification",
+                ""
+            ),
+
+        "Symptoms":
+            getattr(request, "symptoms", ""),
+
+        "Doctor Notes":
+            getattr(request, "doctor_notes", ""),
+
+        "Clinical History":
+            getattr(request, "clinical_history", ""),
+
+        "Doctor Name":
+            getattr(request, "doctor_name", "")
     }
 
     for field_name, value in field_mapping.items():
@@ -163,7 +245,9 @@ def build_clinical_context(request) -> str:
 # GENERATE RECOMMENDATIONS
 # =========================================================
 
-def generate_recommendations(case) -> Dict[str, List[str]]:
+def generate_recommendations(
+    case
+) -> Dict[str, List[str]]:
 
     recommendations = {
 
@@ -201,14 +285,18 @@ def generate_recommendations(case) -> Dict[str, List[str]]:
         recommendations["recommended_tests"] = [
 
             "Knee X-Ray",
+
             "MRI Knee",
+
             "Anterior Drawer Test",
+
             "Physical Stability Assessment"
         ]
 
         recommendations["recommended_medicines"] = [
 
             "Ibuprofen",
+
             "Paracetamol"
         ]
 
@@ -221,13 +309,16 @@ def generate_recommendations(case) -> Dict[str, List[str]]:
         recommendations["recommended_tests"] = [
 
             "Lumbar Spine MRI",
+
             "Posture Assessment",
+
             "Straight Leg Raise Test"
         ]
 
         recommendations["recommended_medicines"] = [
 
             "Diclofenac",
+
             "Muscle Relaxant"
         ]
 
@@ -240,13 +331,16 @@ def generate_recommendations(case) -> Dict[str, List[str]]:
         recommendations["recommended_tests"] = [
 
             "Shoulder MRI",
+
             "Rotator Cuff Examination",
+
             "Shoulder Mobility Test"
         ]
 
         recommendations["recommended_medicines"] = [
 
             "Naproxen",
+
             "Pain Relief Gel"
         ]
 
@@ -259,12 +353,14 @@ def generate_recommendations(case) -> Dict[str, List[str]]:
         recommendations["recommended_tests"] = [
 
             "Cervical Spine X-Ray",
+
             "Neck Mobility Assessment"
         ]
 
         recommendations["recommended_medicines"] = [
 
             "Muscle Relaxant",
+
             "Paracetamol"
         ]
 
@@ -283,12 +379,14 @@ def generate_recommendations(case) -> Dict[str, List[str]]:
         recommendations["recommended_tests"] = [
 
             "Skin Examination",
+
             "Allergy Test"
         ]
 
         recommendations["recommended_medicines"] = [
 
             "Topical Cream",
+
             "Antihistamine"
         ]
 
@@ -298,15 +396,13 @@ def generate_recommendations(case) -> Dict[str, List[str]]:
 
     else:
 
-        recommendations["recommended_tests"] = [
+        recommendations["recommended_tests"] = (
+            DEFAULT_RECOMMENDED_TESTS
+        )
 
-            "Clinical Evaluation"
-        ]
-
-        recommendations["recommended_medicines"] = [
-
-            "General Pain Management"
-        ]
+        recommendations["recommended_medicines"] = (
+            DEFAULT_RECOMMENDED_MEDICINES
+        )
 
     return recommendations
 
@@ -315,13 +411,19 @@ def generate_recommendations(case) -> Dict[str, List[str]]:
 # CONFIDENCE LEVEL
 # =========================================================
 
-def get_confidence_level(score: float) -> str:
+def get_confidence_level(
+    score: float
+) -> str:
 
-    if score >= 0.85:
+    if score >= VERY_HIGH_CONFIDENCE:
+
+        return "Very High"
+
+    elif score >= HIGH_CONFIDENCE:
 
         return "High"
 
-    elif score >= 0.60:
+    elif score >= MEDIUM_CONFIDENCE:
 
         return "Moderate"
 
@@ -332,7 +434,9 @@ def get_confidence_level(score: float) -> str:
 # GENERATE MATCH EXPLANATION
 # =========================================================
 
-def generate_similarity_reason(case) -> str:
+def generate_similarity_reason(
+    case
+) -> str:
 
     keywords = []
 
@@ -376,7 +480,9 @@ def generate_similarity_reason(case) -> str:
 # SANITIZE MATCH
 # =========================================================
 
-def sanitize_match(case) -> Dict[str, Any]:
+def sanitize_match(
+    case
+) -> Dict[str, Any]:
 
     try:
 
@@ -501,12 +607,19 @@ def sanitize_match(case) -> Dict[str, Any]:
 # =========================================================
 
 def clinical_match_pipeline(
+
     request,
+
     request_id,
+
     search_query="",
+
     generated_context="",
+
     combined_symptoms="",
+
     patient_metadata=None,
+
     log_event=None
 ):
 
@@ -518,13 +631,17 @@ def clinical_match_pipeline(
         # DATABASE VALIDATION
         # =================================================
 
-        if not isinstance(case_database, list):
+        if not isinstance(
+            case_database,
+            list
+        ):
 
             raise HTTPException(
 
                 status_code=500,
 
                 detail={
+
                     "status":
                         "Failed",
 
@@ -540,6 +657,7 @@ def clinical_match_pipeline(
                 status_code=500,
 
                 detail={
+
                     "status":
                         "Failed",
 
@@ -554,14 +672,18 @@ def clinical_match_pipeline(
 
         if not search_query:
 
-            search_query = build_search_query(
-                request
+            search_query = (
+                build_search_query(
+                    request
+                )
             )
 
         if not generated_context:
 
-            generated_context = build_clinical_context(
-                request
+            generated_context = (
+                build_clinical_context(
+                    request
+                )
             )
 
         if not combined_symptoms:
@@ -569,19 +691,35 @@ def clinical_match_pipeline(
             combined_symptoms = " ".join([
 
                 safe_text(
-                    request.chief_complaint
+                    getattr(
+                        request,
+                        "chief_complaint",
+                        ""
+                    )
                 ),
 
                 safe_text(
-                    request.subjective_assessment
+                    getattr(
+                        request,
+                        "subjective_assessment",
+                        ""
+                    )
                 ),
 
                 safe_text(
-                    request.objective_findings
+                    getattr(
+                        request,
+                        "objective_findings",
+                        ""
+                    )
                 ),
 
                 safe_text(
-                    request.symptoms
+                    getattr(
+                        request,
+                        "symptoms",
+                        ""
+                    )
                 )
 
             ]).strip()
@@ -643,13 +781,18 @@ def clinical_match_pipeline(
 
         try:
 
-            retrieved_cases = retrieve_similar_cases(
+            retrieved_cases = (
+                retrieve_similar_cases(
 
-                query_text=search_query,
+                    query_text=search_query,
 
-                case_database=case_database,
+                    case_database=case_database,
 
-                top_k=max(TOP_K, 2)
+                    top_k=max(
+                        TOP_K,
+                        MAX_MATCH_RESULTS
+                    )
+                )
             )
 
         except Exception as e:
@@ -727,10 +870,12 @@ def clinical_match_pipeline(
             }
 
         # =================================================
-        # TOP 2 MATCHES ONLY
+        # LIMIT MATCHES
         # =================================================
 
-        top_matches = retrieved_cases[:2]
+        top_matches = retrieved_cases[
+            :MAX_MATCH_RESULTS
+        ]
 
         # =================================================
         # FORMAT MATCHES
@@ -742,8 +887,8 @@ def clinical_match_pipeline(
 
             try:
 
-                formatted_case = sanitize_match(
-                    case
+                formatted_case = (
+                    sanitize_match(case)
                 )
 
                 formatted_matches.append(
@@ -760,14 +905,16 @@ def clinical_match_pipeline(
                         "Failed to format match",
                         {
                             "error":
-                                str(formatting_error)
+                                str(
+                                    formatting_error
+                                )
                         }
                     )
 
                 continue
 
         # =================================================
-        # VALID FORMATTED MATCHES CHECK
+        # VALID MATCH CHECK
         # =================================================
 
         if len(formatted_matches) == 0:
@@ -837,7 +984,9 @@ def clinical_match_pipeline(
                 "Clinical pipeline executed successfully",
                 {
                     "matches_found":
-                        len(formatted_matches),
+                        len(
+                            formatted_matches
+                        ),
 
                     "processing_time_ms":
                         total_time,
