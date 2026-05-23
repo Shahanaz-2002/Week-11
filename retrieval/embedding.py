@@ -1,19 +1,21 @@
 # =========================================================
-# IMPORTS
+# retrieval/embedding.py
 # =========================================================
+
+import logging
+import numpy as np
+import torch
+
+from typing import List, Union
 
 from sentence_transformers import SentenceTransformer
 
-import numpy as np
-
-from typing import (
-    List,
-    Union
+from config import (
+    EMBEDDING_MODEL_NAME,
+    USE_GPU,
+    BATCH_SIZE,
+    EMBEDDING_DIM
 )
-
-import logging
-
-import torch
 
 
 # =========================================================
@@ -21,7 +23,8 @@ import torch
 # =========================================================
 
 logging.basicConfig(
-    level=logging.INFO
+    level=logging.INFO,
+    format="%(message)s"
 )
 
 logger = logging.getLogger(__name__)
@@ -39,6 +42,10 @@ class BioBERTEmbedding:
 
     _model = None
 
+    _device = "cpu"
+
+    _initialized = False
+
     # =====================================================
     # INITIALIZATION
     # =====================================================
@@ -47,95 +54,161 @@ class BioBERTEmbedding:
 
         try:
 
-            # =============================================
+            # =================================================
             # LOAD MODEL ONLY ONCE
-            # =============================================
+            # =================================================
 
-            if BioBERTEmbedding._model is None:
+            if not BioBERTEmbedding._initialized:
 
                 logger.info(
                     "Loading BioBERT embedding model..."
                 )
 
-                device = (
-                    "cuda"
-                    if torch.cuda.is_available()
-                    else "cpu"
-                )
+                if USE_GPU and torch.cuda.is_available():
+
+                    BioBERTEmbedding._device = "cuda"
+
+                else:
+
+                    BioBERTEmbedding._device = "cpu"
 
                 logger.info(
-                    f"Using device: {device}"
+                    f"Using device: {BioBERTEmbedding._device}"
                 )
 
                 BioBERTEmbedding._model = SentenceTransformer(
 
-                    "pritamdeka/BioBERT-mnli-snli-scinli-scitail-mednli-stsb",
+                    EMBEDDING_MODEL_NAME,
 
-                    device=device
+                    device=BioBERTEmbedding._device
                 )
 
+                BioBERTEmbedding._initialized = True
+
                 logger.info(
-                    "BioBERT model loaded successfully."
+                    "BioBERT model loaded successfully"
                 )
 
             self.model = BioBERTEmbedding._model
 
-            # =============================================
+            # =================================================
             # EMBEDDING DIMENSION
-            # =============================================
+            # =================================================
 
             self.embedding_dimension = (
 
                 self.model.get_sentence_embedding_dimension()
             )
 
+            logger.info(
+                f"Embedding Dimension: "
+                f"{self.embedding_dimension}"
+            )
+
         except Exception as error:
 
             logger.error(
-                f"Error loading BioBERT model: {error}"
+                f"Error loading embedding model: {error}"
             )
 
-            raise error
+            raise RuntimeError(
+
+                f"Failed to initialize "
+                f"embedding model: {error}"
+            )
 
     # =====================================================
     # CLEAN TEXT
     # =====================================================
 
     def _clean_text(
+
         self,
+
         text: Union[str, None]
+
     ) -> str:
 
         if text is None:
+
             return ""
 
-        return str(text).strip()
+        text = str(text).strip()
+
+        if text.lower() in [
+
+            "none",
+            "null",
+            "nan"
+        ]:
+
+            return ""
+
+        return text
+
+    # =====================================================
+    # SAFE ZERO VECTOR
+    # =====================================================
+
+    def _zero_vector(self) -> np.ndarray:
+
+        return np.zeros(
+
+            EMBEDDING_DIM,
+
+            dtype=np.float32
+        )
 
     # =====================================================
     # SINGLE TEXT EMBEDDING
     # =====================================================
 
     def encode(
+
         self,
+
         text: str
+
     ) -> np.ndarray:
 
         try:
 
             cleaned_text = self._clean_text(text)
 
-            embedding = self.model.encode(
+            # =============================================
+            # EMPTY TEXT PROTECTION
+            # =============================================
 
-                cleaned_text,
+            if cleaned_text == "":
 
-                convert_to_numpy=True,
+                return self._zero_vector()
 
-                normalize_embeddings=True,
+            with torch.no_grad():
 
-                show_progress_bar=False
-            )
+                embedding = self.model.encode(
 
-            return embedding.astype(np.float32)
+                    cleaned_text,
+
+                    convert_to_numpy=True,
+
+                    normalize_embeddings=True,
+
+                    show_progress_bar=False
+                )
+
+            embedding = embedding.astype(np.float32)
+
+            # =============================================
+            # SAFE DIMENSION CHECK
+            # =============================================
+
+            if embedding.shape[0] != EMBEDDING_DIM:
+
+                logger.warning(
+                    "Embedding dimension mismatch detected"
+                )
+
+            return embedding
 
         except Exception as error:
 
@@ -143,23 +216,18 @@ class BioBERTEmbedding:
                 f"Encoding failed: {error}"
             )
 
-            return np.zeros(
-
-                self.embedding_dimension,
-
-                dtype=np.float32
-            )
+            return self._zero_vector()
 
     # =====================================================
     # ALIAS METHOD
     # =====================================================
 
-    # Some project files may expect this method
-    # so we keep compatibility
-
     def generate_embedding(
+
         self,
+
         text: str
+
     ) -> np.ndarray:
 
         return self.encode(text)
@@ -169,11 +237,18 @@ class BioBERTEmbedding:
     # =====================================================
 
     def encode_batch(
+
         self,
+
         texts: List[str]
+
     ) -> np.ndarray:
 
         try:
+
+            if not isinstance(texts, list):
+
+                texts = []
 
             cleaned_texts = [
 
@@ -182,18 +257,33 @@ class BioBERTEmbedding:
                 for text in texts
             ]
 
-            embeddings = self.model.encode(
+            if len(cleaned_texts) == 0:
 
-                cleaned_texts,
+                return np.zeros(
 
-                convert_to_numpy=True,
+                    (0, EMBEDDING_DIM),
 
-                normalize_embeddings=True,
+                    dtype=np.float32
+                )
 
-                show_progress_bar=False
-            )
+            with torch.no_grad():
 
-            return embeddings.astype(np.float32)
+                embeddings = self.model.encode(
+
+                    cleaned_texts,
+
+                    batch_size=BATCH_SIZE,
+
+                    convert_to_numpy=True,
+
+                    normalize_embeddings=True,
+
+                    show_progress_bar=False
+                )
+
+            embeddings = embeddings.astype(np.float32)
+
+            return embeddings
 
         except Exception as error:
 
@@ -205,7 +295,7 @@ class BioBERTEmbedding:
 
                 (
                     len(texts),
-                    self.embedding_dimension
+                    EMBEDDING_DIM
                 ),
 
                 dtype=np.float32
@@ -226,6 +316,10 @@ class BioBERTEmbedding:
     ) -> float:
 
         try:
+
+            if embedding_1 is None or embedding_2 is None:
+
+                return 0.0
 
             norm_1 = np.linalg.norm(
                 embedding_1
@@ -253,7 +347,18 @@ class BioBERTEmbedding:
                 norm_1 * norm_2
             )
 
-            return float(similarity)
+            similarity = float(similarity)
+
+            # =============================================
+            # SAFE CLAMPING
+            # =============================================
+
+            similarity = max(
+                -1.0,
+                min(1.0, similarity)
+            )
+
+            return similarity
 
         except Exception as error:
 
@@ -267,11 +372,16 @@ class BioBERTEmbedding:
     # VECTOR DIMENSION
     # =====================================================
 
-    def get_embedding_dimension(
-        self
-    ) -> int:
+    def get_embedding_dimension(self) -> int:
 
         return self.embedding_dimension
+
+
+# =========================================================
+# GLOBAL SHARED INSTANCE
+# =========================================================
+
+embedding_model = BioBERTEmbedding()
 
 
 # =========================================================
@@ -280,28 +390,46 @@ class BioBERTEmbedding:
 
 if __name__ == "__main__":
 
-    model = BioBERTEmbedding()
+    try:
 
-    sample_text = (
-        "Patient has severe lower back pain "
-        "with difficulty walking."
-    )
+        sample_text = (
 
-    embedding = model.encode(
-        sample_text
-    )
+            "Patient has severe lower back pain "
+            "with difficulty walking."
+        )
 
-    print(
-        "Embedding Shape:",
-        embedding.shape
-    )
+        embedding = embedding_model.encode(
+            sample_text
+        )
 
-    print(
-        "Embedding Dimension:",
-        model.get_embedding_dimension()
-    )
+        print(
+            "Embedding Shape:",
+            embedding.shape
+        )
 
-    print(
-        "Embedding Sample:",
-        embedding[:10]
-    )
+        print(
+            "Embedding Dimension:",
+            embedding_model.get_embedding_dimension()
+        )
+
+        print(
+            "Embedding Sample:",
+            embedding[:10]
+        )
+
+        similarity = embedding_model.cosine_similarity(
+
+            embedding,
+            embedding
+        )
+
+        print(
+            "Self Similarity:",
+            similarity
+        )
+
+    except Exception as error:
+
+        print(
+            f"Test failed: {error}"
+        )

@@ -1,3 +1,7 @@
+# =========================================================
+# models/models.py
+# =========================================================
+
 from pydantic import (
     BaseModel,
     Field,
@@ -14,11 +18,17 @@ from typing import (
 )
 
 import re
+
 from datetime import datetime
+
+from config import (
+    MAX_MATCH_RESULTS,
+    ALLOWED_GENDERS
+)
 
 
 # =========================================================
-# TEXT CLEANER
+# SAFE TEXT CLEANER
 # =========================================================
 
 def clean_text(value):
@@ -31,7 +41,11 @@ def clean_text(value):
 
     value = value.strip()
 
-    value = re.sub(r"\s+", " ", value)
+    value = re.sub(
+        r"\s+",
+        " ",
+        value
+    )
 
     value = re.sub(
         r"[^\w\s.,\-:/()]",
@@ -39,7 +53,7 @@ def clean_text(value):
         value
     )
 
-    return value
+    return value.strip()
 
 
 # =========================================================
@@ -56,12 +70,38 @@ def safe_list(value):
 
 
 # =========================================================
+# SAFE FLOAT
+# =========================================================
+
+def safe_float(value):
+
+    try:
+
+        value = float(value)
+
+        value = max(
+            0.0,
+            min(value, 1.0)
+        )
+
+        return round(value, 4)
+
+    except Exception:
+
+        return 0.0
+
+
+# =========================================================
 # PATIENT METADATA MODEL
 # =========================================================
 
 class PatientMetadata(BaseModel):
 
-    age: Optional[int] = None
+    age: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=120
+    )
 
     gender: Optional[str] = ""
 
@@ -136,6 +176,18 @@ class ClinicalMatchRequest(BaseModel):
 
     medications_history: Optional[str] = ""
 
+    # -----------------------------------------------------
+    # DERMATOLOGY SUPPORT
+    # -----------------------------------------------------
+
+    skin_condition: Optional[str] = ""
+
+    affected_skin_area: Optional[str] = ""
+
+    skin_type: Optional[str] = ""
+
+    previous_skin_conditions: Optional[str] = ""
+
     model_config = ConfigDict(
         extra="ignore"
     )
@@ -155,9 +207,9 @@ class ClinicalMatchRequest(BaseModel):
 
             value = clean_text(value)
 
-            if len(value) > 1000:
+            if len(value) > 2000:
 
-                value = value[:1000]
+                value = value[:2000]
 
         return value
 
@@ -175,16 +227,16 @@ class ClinicalMatchRequest(BaseModel):
 
         allowed = [
 
-            "male",
-            "female",
-            "other",
-            "prefer not to say"
+            gender.lower()
+
+            for gender in ALLOWED_GENDERS
         ]
 
         if value.lower() not in allowed:
 
             raise ValueError(
-                "Invalid gender value"
+                f"Invalid gender value. "
+                f"Allowed: {ALLOWED_GENDERS}"
             )
 
         return value.title()
@@ -236,7 +288,16 @@ class ClinicalMatchRequest(BaseModel):
             self.patient_pain_classification,
             self.previous_injuries,
             self.clinical_history,
-            self.additional_findings
+            self.additional_findings,
+
+            # =============================================
+            # DERMATOLOGY SUPPORT
+            # =============================================
+
+            self.skin_condition,
+            self.affected_skin_area,
+            self.skin_type,
+            self.previous_skin_conditions
         ]
 
         cleaned_fields = [
@@ -253,10 +314,10 @@ class ClinicalMatchRequest(BaseModel):
 
         return " | ".join(
             cleaned_fields
-        )
+        ).strip()
 
     # =====================================================
-    # GENERATED CONTEXT
+    # CONTEXT GENERATION
     # =====================================================
 
     def build_context(self):
@@ -323,7 +384,23 @@ class ClinicalMatchRequest(BaseModel):
                 self.doctor_notes,
 
             "Additional Findings":
-                self.additional_findings
+                self.additional_findings,
+
+            # =============================================
+            # DERMATOLOGY SUPPORT
+            # =============================================
+
+            "Skin Condition":
+                self.skin_condition,
+
+            "Affected Skin Area":
+                self.affected_skin_area,
+
+            "Skin Type":
+                self.skin_type,
+
+            "Previous Skin Conditions":
+                self.previous_skin_conditions
         }
 
         for key, value in field_map.items():
@@ -403,7 +480,8 @@ class ClinicalMatchRequest(BaseModel):
                 self.chief_complaint,
                 self.patient_pain_classification,
                 self.subjective_assessment,
-                self.objective_findings
+                self.objective_findings,
+                self.skin_condition
             ]
 
             if x not in [
@@ -463,6 +541,10 @@ class RecommendationModel(BaseModel):
         default_factory=list
     )
 
+    skincare_plan: List[str] = Field(
+        default_factory=list
+    )
+
     model_config = ConfigDict(
         extra="ignore"
     )
@@ -517,6 +599,10 @@ class MatchResult(BaseModel):
 
     recommendation: RecommendationModel
 
+    case_data: Dict[str, Any] = Field(
+        default_factory=dict
+    )
+
     model_config = ConfigDict(
         extra="ignore"
     )
@@ -543,38 +629,17 @@ class MatchResult(BaseModel):
         return value
 
     # =====================================================
-    # MATCH SCORE VALIDATION
+    # SCORE VALIDATION
     # =====================================================
 
-    @field_validator("match_score")
+    @field_validator(
+        "match_score",
+        "semantic_score"
+    )
     @classmethod
-    def validate_match_score(cls, value):
+    def validate_scores(cls, value):
 
-        value = float(value)
-
-        value = max(
-            0.0,
-            min(value, 1.0)
-        )
-
-        return round(value, 4)
-
-    # =====================================================
-    # SEMANTIC SCORE VALIDATION
-    # =====================================================
-
-    @field_validator("semantic_score")
-    @classmethod
-    def validate_semantic_score(cls, value):
-
-        value = float(value)
-
-        value = max(
-            0.0,
-            min(value, 1.0)
-        )
-
-        return round(value, 4)
+        return safe_float(value)
 
 
 # =========================================================
@@ -589,7 +654,7 @@ class ClinicalMatchResponse(BaseModel):
 
     request_id: str
 
-    api_version: str = "5.0.0"
+    api_version: str = "6.0.0"
 
     request_timestamp: str = Field(
         default_factory=lambda:
@@ -647,9 +712,9 @@ class ClinicalMatchResponse(BaseModel):
 
             return 0
 
-        if value > 2:
+        if value > MAX_MATCH_RESULTS:
 
-            return 2
+            return MAX_MATCH_RESULTS
 
         return value
 
@@ -661,14 +726,7 @@ class ClinicalMatchResponse(BaseModel):
     @classmethod
     def validate_confidence_score(cls, value):
 
-        value = float(value)
-
-        value = max(
-            0.0,
-            min(value, 1.0)
-        )
-
-        return round(value, 4)
+        return safe_float(value)
 
     # =====================================================
     # PROCESSING TIME VALIDATION
@@ -678,10 +736,16 @@ class ClinicalMatchResponse(BaseModel):
     @classmethod
     def validate_processing_time(cls, value):
 
-        value = float(value)
+        try:
 
-        if value < 0:
+            value = float(value)
+
+            if value < 0:
+
+                return 0.0
+
+            return round(value, 2)
+
+        except Exception:
 
             return 0.0
-
-        return round(value, 2)

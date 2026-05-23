@@ -1,606 +1,617 @@
 # =========================================================
-# services/analyze_service.py
+# retrieval/database.py
 # =========================================================
 
+import logging
+import json
 import time
+from typing import List, Dict, Any
 
-import traceback
-
-from fastapi import HTTPException
-
-from retrieval.retrieval_engine import (
-    retrieve_similar_cases
+from pymongo import MongoClient
+from pymongo.errors import (
+    ConnectionFailure,
+    ServerSelectionTimeoutError,
+    PyMongoError
 )
 
-from retrieval.database import (
-    fetch_case_database
+from config import (
+    MONGO_URI,
+    DATABASE_NAME,
+    COLLECTION_NAME,
+    MONGO_SERVER_SELECTION_TIMEOUT_MS,
+    MONGO_CONNECT_TIMEOUT_MS,
+    MONGO_SOCKET_TIMEOUT_MS
 )
 
-from config import TOP_K
+
+# =========================================================
+# LOGGING CONFIGURATION
+# =========================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    force=True
+)
+
+logger = logging.getLogger(__name__)
 
 
 # =========================================================
-# SAFE TEXT
+# LOG EVENT
 # =========================================================
 
-def safe_text(value):
-
-    if value in [None, "", [], {}]:
-
-        return ""
-
-    return str(value).strip()
-
-
-# =========================================================
-# SAFE ATTRIBUTE ACCESS
-# =========================================================
-
-def safe_attr(obj, field):
-
-    try:
-
-        return getattr(obj, field, "")
-
-    except Exception:
-
-        return ""
-
-
-# =========================================================
-# BUILD SEARCH QUERY
-# =========================================================
-
-def build_search_query(request):
-
-    query_parts = []
-
-    weighted_fields = [
-
-        safe_attr(request, "skin_condition"),
-
-        safe_attr(request, "affected_skin_area"),
-
-        safe_attr(request, "symptoms"),
-
-        safe_attr(request, "skin_type"),
-
-        safe_attr(request, "subjective_assessment"),
-
-        safe_attr(request, "physical_examination"),
-
-        safe_attr(request, "objective_findings"),
-
-        safe_attr(request, "previous_skin_conditions"),
-
-        safe_attr(request, "allergies"),
-
-        safe_attr(request, "doctor_notes"),
-
-        safe_attr(request, "clinical_history"),
-
-        # ============================================
-        # SUPPORT GENERIC CLINICAL FIELDS
-        # ============================================
-
-        safe_attr(request, "chief_complaint"),
-
-        safe_attr(request, "affected_body_part")
-    ]
-
-    for field in weighted_fields:
-
-        cleaned = safe_text(field)
-
-        if cleaned:
-
-            query_parts.append(cleaned)
-
-    return " | ".join(query_parts).strip()
-
-
-# =========================================================
-# BUILD CONTEXT
-# =========================================================
-
-def build_dermatology_context(request):
-
-    context_parts = []
-
-    field_mapping = {
-
-        "Age":
-            safe_attr(request, "age"),
-
-        "Gender":
-            safe_attr(request, "gender"),
-
-        "Skin Type":
-            safe_attr(request, "skin_type"),
-
-        "Occupation":
-            safe_attr(request, "occupation"),
-
-        "Skin Condition":
-            safe_attr(request, "skin_condition"),
-
-        "Affected Skin Area":
-            safe_attr(request, "affected_skin_area"),
-
-        "Symptoms":
-            safe_attr(request, "symptoms"),
-
-        "Doctor Notes":
-            safe_attr(request, "doctor_notes"),
-
-        "Clinical History":
-            safe_attr(request, "clinical_history")
-    }
-
-    for field_name, value in field_mapping.items():
-
-        cleaned = safe_text(value)
-
-        if cleaned:
-
-            context_parts.append(
-                f"{field_name}: {cleaned}"
-            )
-
-    return "\n".join(context_parts)
-
-
-# =========================================================
-# GENERATE RECOMMENDATIONS
-# =========================================================
-
-def generate_recommendations(case):
-
-    recommendations = {
-
-        "recommended_tests": [],
-
-        "recommended_medicines": [],
-
-        "skincare_plan": [],
-
-        "precautions": []
-    }
-
-    combined_text = (
-
-        safe_text(case.get("skin_condition")) +
-
-        " " +
-
-        safe_text(case.get("symptoms")) +
-
-        " " +
-
-        safe_text(case.get("doctor_notes"))
-
-    ).lower()
-
-    # =====================================================
-    # ACNE
-    # =====================================================
-
-    if "acne" in combined_text:
-
-        recommendations["recommended_tests"] = [
-
-            "Dermatoscopy",
-
-            "Hormonal Evaluation"
-        ]
-
-        recommendations["recommended_medicines"] = [
-
-            "Benzoyl Peroxide",
-
-            "Topical Retinoid"
-        ]
-
-    # =====================================================
-    # ECZEMA
-    # =====================================================
-
-    elif "eczema" in combined_text:
-
-        recommendations["recommended_tests"] = [
-
-            "Patch Allergy Test"
-        ]
-
-        recommendations["recommended_medicines"] = [
-
-            "Topical Corticosteroid",
-
-            "Moisturizer"
-        ]
-
-    # =====================================================
-    # PSORIASIS
-    # =====================================================
-
-    elif "psoriasis" in combined_text:
-
-        recommendations["recommended_tests"] = [
-
-            "Skin Biopsy"
-        ]
-
-        recommendations["recommended_medicines"] = [
-
-            "Topical Steroids"
-        ]
-
-    # =====================================================
-    # FALLBACK
-    # =====================================================
-
-    else:
-
-        recommendations["recommended_tests"] = [
-
-            "Dermatology Consultation"
-        ]
-
-        recommendations["recommended_medicines"] = [
-
-            "Symptomatic Skin Care"
-        ]
-
-    return recommendations
-
-
-# =========================================================
-# CONFIDENCE
-# =========================================================
-
-def get_confidence_level(score):
-
-    if score >= 0.85:
-
-        return "High"
-
-    elif score >= 0.60:
-
-        return "Moderate"
-
-    return "Low"
-
-
-# =========================================================
-# GENERATE MATCH REASON
-# =========================================================
-
-def generate_similarity_reason(case):
-
-    keywords = []
-
-    for field in [
-
-        "skin_condition",
-
-        "affected_skin_area",
-
-        "objective_findings",
-
-        "chief_complaint",
-
-        "affected_body_part"
-    ]:
-
-        value = safe_text(
-            case.get(field)
-        )
-
-        if value:
-
-            keywords.append(value)
-
-    if not keywords:
-
-        return (
-            "Matched using semantic similarity"
-        )
-
-    return (
-        "Matched based on: " +
-        ", ".join(keywords[:3])
-    )
-
-
-# =========================================================
-# SANITIZE MATCH
-# =========================================================
-
-def sanitize_match(case):
-
-    similarity_score = round(
-
-        float(case.get("similarity", 0.0)),
-
-        4
-    )
-
-    similarity_score = max(
-
-        0.0,
-
-        min(1.0, similarity_score)
-    )
-
-    return {
-
-        "case_id":
-            str(case.get("case_id", "Unknown")),
-
-        "match_score":
-            similarity_score,
-
-        "confidence_level":
-            get_confidence_level(similarity_score),
-
-        "matched_keywords":
-            case.get("matched_keywords", []),
-
-        "semantic_score":
-            similarity_score,
-
-        "retrieval_source":
-            "BioBERT Clinical Retrieval",
-
-        "explanation":
-            generate_similarity_reason(case),
-
-        "recommendation":
-            generate_recommendations(case),
-
-        # ============================================
-        # RETURN RAW CASE TOO
-        # ============================================
-
-        "case_data":
-            case
-    }
-
-
-# =========================================================
-# MAIN PIPELINE
-# =========================================================
-
-def clinical_match_pipeline(
-
-    request,
-
-    request_id,
-
-    search_query="",
-
-    generated_context="",
-
-    combined_symptoms="",
-
-    patient_metadata=None,
-
-    log_event=None
+def log_event(
+    event_type,
+    message,
+    extra=None
 ):
 
-    start_time = time.time()
+    log_data = {
+
+        "event": event_type,
+
+        "message": message,
+
+        "timestamp": time.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+    }
+
+    if extra:
+
+        log_data.update(extra)
+
+    logger.info(
+        json.dumps(log_data)
+    )
+
+
+# =========================================================
+# MONGODB CONNECTION
+# =========================================================
+
+client = None
+
+database = None
+
+collection = None
+
+
+# =========================================================
+# CONNECT DATABASE
+# =========================================================
+
+def connect_database():
+
+    global client
+    global database
+    global collection
 
     try:
 
-        # =================================================
-        # FETCH DATABASE DYNAMICALLY
-        # =================================================
+        client = MongoClient(
 
-        case_database = fetch_case_database()
+            MONGO_URI,
 
-        if not isinstance(case_database, list):
+            serverSelectionTimeoutMS=
+                MONGO_SERVER_SELECTION_TIMEOUT_MS,
 
-            raise HTTPException(
+            connectTimeoutMS=
+                MONGO_CONNECT_TIMEOUT_MS,
 
-                status_code=500,
-
-                detail={
-                    "status": "Failed",
-                    "message": "Invalid case database"
-                }
-            )
-
-        # =================================================
-        # BUILD SEARCH QUERY
-        # =================================================
-
-        if not search_query:
-
-            search_query = build_search_query(
-                request
-            )
-
-        if not generated_context:
-
-            generated_context = (
-                build_dermatology_context(
-                    request
-                )
-            )
-
-        if not combined_symptoms:
-
-            combined_symptoms = " ".join([
-
-                safe_text(
-                    safe_attr(request, "skin_condition")
-                ),
-
-                safe_text(
-                    safe_attr(request, "symptoms")
-                ),
-
-                safe_text(
-                    safe_attr(request, "objective_findings")
-                )
-            ]).strip()
-
-        if not search_query.strip():
-
-            raise HTTPException(
-
-                status_code=400,
-
-                detail={
-                    "error": "Invalid Input",
-                    "message": "Search query empty"
-                }
-            )
-
-        # =================================================
-        # RETRIEVE CASES
-        # =================================================
-
-        retrieved_cases = retrieve_similar_cases(
-
-            query_text=search_query,
-
-            case_database=case_database,
-
-            top_k=max(TOP_K, 2)
+            socketTimeoutMS=
+                MONGO_SOCKET_TIMEOUT_MS
         )
 
         # =================================================
-        # NO MATCH
+        # TEST CONNECTION
         # =================================================
 
-        if not retrieved_cases:
+        client.admin.command("ping")
+
+        database = client[DATABASE_NAME]
+
+        collection = database[COLLECTION_NAME]
+
+        log_event(
+
+            "database_connected",
+
+            "MongoDB connection established successfully",
+
+            {
+                "database":
+                    DATABASE_NAME,
+
+                "collection":
+                    COLLECTION_NAME
+            }
+        )
+
+        return collection
+
+    except (
+        ConnectionFailure,
+        ServerSelectionTimeoutError
+    ) as connection_error:
+
+        log_event(
+
+            "database_connection_failed",
+
+            "MongoDB connection failed",
+
+            {
+                "error":
+                    str(connection_error)
+            }
+        )
+
+        client = None
+        database = None
+        collection = None
+
+        return None
+
+    except Exception as e:
+
+        log_event(
+
+            "database_error",
+
+            "Unexpected database error",
+
+            {
+                "error":
+                    str(e)
+            }
+        )
+
+        client = None
+        database = None
+        collection = None
+
+        return None
+
+
+# =========================================================
+# INITIALIZE CONNECTION
+# =========================================================
+
+connect_database()
+
+
+# =========================================================
+# DATABASE HEALTH CHECK
+# =========================================================
+
+def database_health_check():
+
+    global client
+
+    try:
+
+        if client is None:
 
             return {
 
                 "status":
-                    "No Match",
+                    "Disconnected",
 
                 "message":
-                    "No similar cases found",
-
-                "matches":
-                    [],
-
-                "total_matches_found":
-                    0,
-
-                "confidence_score":
-                    0.0,
-
-                "generated_context":
-                    generated_context,
-
-                "search_query":
-                    search_query
+                    "MongoDB client unavailable"
             }
 
-        # =================================================
-        # FORMAT RESULTS
-        # =================================================
-
-        formatted_matches = [
-
-            sanitize_match(case)
-
-            for case in retrieved_cases[:2]
-        ]
-
-        confidence_score = round(
-
-            sum([
-                x["match_score"]
-                for x in formatted_matches
-            ]) / len(formatted_matches),
-
-            4
-        )
+        client.admin.command("ping")
 
         return {
 
             "status":
-                "Success",
+                "Healthy",
 
-            "message":
-                "Clinical matches retrieved successfully",
+            "database":
+                DATABASE_NAME,
 
-            "matches":
-                formatted_matches,
-
-            "total_matches_found":
-                len(formatted_matches),
-
-            "confidence_score":
-                confidence_score,
-
-            "generated_context":
-                generated_context,
-
-            "search_query":
-                search_query,
-
-            "processing_time_ms":
-                round(
-                    (
-                        time.time() -
-                        start_time
-                    ) * 1000,
-                    2
-                ),
-
-            "explanation":
-                "AI-powered semantic retrieval completed"
+            "collection":
+                COLLECTION_NAME
         }
-
-    except HTTPException:
-
-        raise
 
     except Exception as e:
 
-        if log_event:
+        return {
+
+            "status":
+                "Failed",
+
+            "error":
+                str(e)
+        }
+
+
+# =========================================================
+# FETCH CASE DATABASE
+# =========================================================
+
+def fetch_case_database() -> List[Dict[str, Any]]:
+
+    global collection
+
+    try:
+
+        # ================================================
+        # RECONNECT IF NEEDED
+        # ================================================
+
+        if collection is None:
+
+            connect_database()
+
+        if collection is None:
 
             log_event(
 
-                "pipeline_error",
+                "database_unavailable",
 
-                request_id,
-
-                "Clinical pipeline failure",
-
-                {
-                    "error":
-                        str(e),
-
-                    "traceback":
-                        traceback.format_exc()
-                }
+                "MongoDB collection unavailable"
             )
 
-        raise HTTPException(
+            return []
 
-            status_code=500,
+        # ================================================
+        # FETCH RECORDS
+        # ================================================
 
-            detail={
+        records = list(
 
-                "status":
-                    "Failed",
+            collection.find(
+                {},
+                {"_id": 0}
+            )
+        )
 
-                "message":
-                    "Pipeline execution failed",
+        cleaned_records = []
 
-                "matches":
-                    [],
+        for record in records:
 
-                "confidence_score":
-                    0.0,
+            try:
 
-                "explanation":
+                if not isinstance(record, dict):
+
+                    continue
+
+                # ========================================
+                # ENSURE CASE ID EXISTS
+                # ========================================
+
+                if "case_id" not in record:
+
+                    record["case_id"] = (
+                        f"CASE_{len(cleaned_records)+1}"
+                    )
+
+                # ========================================
+                # ENSURE EMBEDDING EXISTS
+                # ========================================
+
+                embedding = record.get(
+                    "embedding",
+                    None
+                )
+
+                if embedding is None:
+
+                    continue
+
+                if not isinstance(
+                    embedding,
+                    list
+                ):
+
+                    continue
+
+                if len(embedding) == 0:
+
+                    continue
+
+                cleaned_records.append(record)
+
+            except Exception:
+
+                continue
+
+        log_event(
+
+            "database_records_loaded",
+
+            "Clinical cases loaded successfully",
+
+            {
+                "total_records":
+                    len(cleaned_records)
+            }
+        )
+
+        return cleaned_records
+
+    except PyMongoError as mongo_error:
+
+        log_event(
+
+            "database_fetch_error",
+
+            "MongoDB fetch failed",
+
+            {
+                "error":
+                    str(mongo_error)
+            }
+        )
+
+        return []
+
+    except Exception as e:
+
+        log_event(
+
+            "database_fetch_exception",
+
+            "Unexpected fetch error",
+
+            {
+                "error":
                     str(e)
             }
         )
+
+        return []
+
+
+# =========================================================
+# INSERT SINGLE CASE
+# =========================================================
+
+def insert_case(case_data: Dict[str, Any]):
+
+    global collection
+
+    try:
+
+        if collection is None:
+
+            connect_database()
+
+        if collection is None:
+
+            return False
+
+        if not isinstance(case_data, dict):
+
+            return False
+
+        collection.insert_one(case_data)
+
+        log_event(
+
+            "case_inserted",
+
+            "Clinical case inserted successfully",
+
+            {
+                "case_id":
+                    case_data.get(
+                        "case_id",
+                        "Unknown"
+                    )
+            }
+        )
+
+        return True
+
+    except Exception as e:
+
+        log_event(
+
+            "case_insert_error",
+
+            "Failed to insert case",
+
+            {
+                "error":
+                    str(e)
+            }
+        )
+
+        return False
+
+
+# =========================================================
+# UPDATE CASE
+# =========================================================
+
+def update_case(
+    case_id: str,
+    update_fields: Dict[str, Any]
+):
+
+    global collection
+
+    try:
+
+        if collection is None:
+
+            connect_database()
+
+        if collection is None:
+
+            return False
+
+        result = collection.update_one(
+
+            {"case_id": case_id},
+
+            {
+                "$set":
+                    update_fields
+            }
+        )
+
+        if result.modified_count > 0:
+
+            log_event(
+
+                "case_updated",
+
+                "Clinical case updated",
+
+                {
+                    "case_id":
+                        case_id
+                }
+            )
+
+            return True
+
+        return False
+
+    except Exception as e:
+
+        log_event(
+
+            "case_update_error",
+
+            "Failed to update case",
+
+            {
+                "case_id":
+                    case_id,
+
+                "error":
+                    str(e)
+            }
+        )
+
+        return False
+
+
+# =========================================================
+# DELETE CASE
+# =========================================================
+
+def delete_case(case_id: str):
+
+    global collection
+
+    try:
+
+        if collection is None:
+
+            connect_database()
+
+        if collection is None:
+
+            return False
+
+        result = collection.delete_one(
+
+            {"case_id": case_id}
+        )
+
+        if result.deleted_count > 0:
+
+            log_event(
+
+                "case_deleted",
+
+                "Clinical case deleted",
+
+                {
+                    "case_id":
+                        case_id
+                }
+            )
+
+            return True
+
+        return False
+
+    except Exception as e:
+
+        log_event(
+
+            "case_delete_error",
+
+            "Failed to delete case",
+
+            {
+                "case_id":
+                    case_id,
+
+                "error":
+                    str(e)
+            }
+        )
+
+        return False
+
+
+# =========================================================
+# CLOSE DATABASE CONNECTION
+# =========================================================
+
+def close_database_connection():
+
+    global client
+
+    try:
+
+        if client is not None:
+
+            client.close()
+
+            log_event(
+
+                "database_connection_closed",
+
+                "MongoDB connection closed"
+            )
+
+    except Exception as e:
+
+        log_event(
+
+            "database_close_error",
+
+            "Failed to close MongoDB connection",
+
+            {
+                "error":
+                    str(e)
+            }
+        )
+
+
+# =========================================================
+# MAIN TEST
+# =========================================================
+
+if __name__ == "__main__":
+
+    print("\n===================================")
+    print("DATABASE CONNECTION TEST")
+    print("===================================\n")
+
+    health = database_health_check()
+
+    print(
+        json.dumps(
+            health,
+            indent=4
+        )
+    )
+
+    cases = fetch_case_database()
+
+    print(f"\nLoaded Cases: {len(cases)}")
+
+    print("\n===================================\n")

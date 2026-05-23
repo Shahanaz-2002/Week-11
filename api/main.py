@@ -1,28 +1,24 @@
 # =========================================================
+# api/main.py
+# =========================================================
+
+# =========================================================
 # IMPORTS
 # =========================================================
 
 import time
-
 import logging
-
 import uuid
-
 import json
+import traceback
 
 from contextlib import asynccontextmanager
-
 from typing import Dict, Any
 
-
 from fastapi import (
-
     FastAPI,
-
     HTTPException,
-
     Request,
-
     status
 )
 
@@ -32,22 +28,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi.exceptions import RequestValidationError
 
-
 import uvicorn
 
-
 from models.models import (
-
     ClinicalMatchRequest,
-
     ClinicalMatchResponse
 )
 
 from services.analyze_service import (
-
     clinical_match_pipeline
 )
-
 
 # =========================================================
 # API CONFIGURATION
@@ -59,22 +49,17 @@ APP_NAME = "Clinical Match API"
 
 MAX_MATCHES = 2
 
-
 # =========================================================
 # LOGGING CONFIGURATION
 # =========================================================
 
 logging.basicConfig(
-
     level=logging.INFO,
-
     format="%(message)s",
-
     force=True
 )
 
 logger = logging.getLogger(__name__)
-
 
 # =========================================================
 # STANDARD RESPONSE HELPERS
@@ -101,6 +86,7 @@ def standard_error_response(
     request_id: str,
 
     error: Any = None
+
 ) -> Dict[str, Any]:
 
     return {
@@ -123,7 +109,6 @@ def standard_error_response(
         "error":
             error
     }
-
 
 # =========================================================
 # LOG EVENT FUNCTION
@@ -160,9 +145,11 @@ def log_event(
         log_data.update(extra)
 
     logger.info(
-        json.dumps(log_data)
+        json.dumps(
+            log_data,
+            default=str
+        )
     )
-
 
 # =========================================================
 # APPLICATION LIFECYCLE
@@ -209,7 +196,6 @@ async def lifespan(app: FastAPI):
         })
     )
 
-
 # =========================================================
 # FASTAPI APPLICATION
 # =========================================================
@@ -226,7 +212,7 @@ AI-Powered Clinical Similarity Matching API
 Features:
 - Dynamic Optional Clinical Input Processing
 - Semantic Similarity Retrieval
-- Top-2 Similar Patient Matching
+- Top Clinical Patient Matching
 - Clinical Recommendation Generation
 - Confidence Score Analysis
 - Error Stabilization & Validation
@@ -237,7 +223,6 @@ Features:
 
     lifespan=lifespan
 )
-
 
 # =========================================================
 # CORS CONFIGURATION
@@ -255,7 +240,6 @@ app.add_middleware(
 
     allow_headers=["*"]
 )
-
 
 # =========================================================
 # VALIDATION HANDLER
@@ -304,7 +288,6 @@ async def validation_exception_handler(
         )
     )
 
-
 # =========================================================
 # GLOBAL EXCEPTION HANDLER
 # =========================================================
@@ -330,7 +313,10 @@ async def global_exception_handler(
 
         {
             "error":
-                str(exc)
+                str(exc),
+
+            "traceback":
+                traceback.format_exc()
         }
     )
 
@@ -349,7 +335,6 @@ async def global_exception_handler(
             error=str(exc)
         )
     )
-
 
 # =========================================================
 # ROOT ROUTE
@@ -377,7 +362,6 @@ def root():
             "/redoc"
     }
 
-
 # =========================================================
 # HEALTH CHECK
 # =========================================================
@@ -403,7 +387,6 @@ def health_check():
         "server":
             "FastAPI + Uvicorn"
     }
-
 
 # =========================================================
 # DEBUG ROUTE
@@ -434,7 +417,6 @@ def debug_sample():
             "physical_examination"
         ]
     }
-
 
 # =========================================================
 # MAIN CLINICAL MATCH ENDPOINT
@@ -468,11 +450,10 @@ def clinical_match(
     try:
 
         # =================================================
-        # PROCESS INPUTS
+        # GENERATE DYNAMIC INPUTS
         # =================================================
 
         processed_inputs = (
-
             request.generate_dynamic_inputs()
         )
 
@@ -481,59 +462,45 @@ def clinical_match(
             dict
         ):
 
-            raise HTTPException(
-
-                status_code=400,
-
-                detail="Invalid processed input structure"
-            )
+            processed_inputs = {}
 
         search_query = processed_inputs.get(
-
             "search_query",
-
             ""
-        ).strip()
+        )
 
         generated_context = processed_inputs.get(
-
             "generated_context",
-
             ""
         )
 
         combined_symptoms = processed_inputs.get(
-
             "combined_symptoms",
-
             ""
         )
 
         patient_metadata = processed_inputs.get(
-
             "patient_metadata",
-
             {}
         )
 
         available_fields = processed_inputs.get(
-
             "available_fields",
-
             []
         )
 
         # =================================================
-        # VALIDATION
+        # VALIDATE SEARCH QUERY
         # =================================================
 
-        if not search_query:
+        if not str(search_query).strip():
 
             raise HTTPException(
 
                 status_code=400,
 
                 detail={
+
                     "status":
                         "Failed",
 
@@ -541,23 +508,6 @@ def clinical_match(
                         "No valid clinical input fields provided"
                 }
             )
-
-        log_event(
-
-            "query_generated",
-
-            request_id,
-
-            "Clinical query generated",
-
-            {
-                "search_query":
-                    search_query,
-
-                "available_fields":
-                    available_fields
-            }
-        )
 
         # =================================================
         # EXECUTE PIPELINE
@@ -603,29 +553,28 @@ def clinical_match(
 
             matches = []
 
-        matches = matches[
-            :MAX_MATCHES
-        ]
-
-        confidence_score = result.get(
-
-            "confidence_score",
-
-            0.0
-        )
+        matches = matches[:MAX_MATCHES]
 
         try:
 
-            confidence_score = round(
-
-                float(confidence_score),
-
-                4
+            confidence_score = float(
+                result.get(
+                    "confidence_score",
+                    0.0
+                )
             )
 
         except Exception:
 
             confidence_score = 0.0
+
+        confidence_score = round(
+            max(
+                0.0,
+                min(1.0, confidence_score)
+            ),
+            4
+        )
 
         processing_time = round(
 
@@ -637,18 +586,6 @@ def clinical_match(
             2
         )
 
-        explanation = result.get(
-            "explanation"
-        )
-
-        if not explanation:
-
-            explanation = (
-
-                "Top clinical matches retrieved "
-                "using semantic similarity"
-            )
-
         # =================================================
         # FINAL RESPONSE
         # =================================================
@@ -656,10 +593,16 @@ def clinical_match(
         final_response = {
 
             "status":
-                "Success",
+                result.get(
+                    "status",
+                    "Success"
+                ),
 
             "message":
-                "Clinical matching completed successfully",
+                result.get(
+                    "message",
+                    "Clinical matching completed successfully"
+                ),
 
             "request_id":
                 request_id,
@@ -698,7 +641,16 @@ def clinical_match(
                 patient_metadata,
 
             "explanation":
-                explanation
+                result.get(
+                    "explanation",
+                    "Semantic clinical retrieval completed"
+                ),
+
+            "warnings":
+                [],
+
+            "success":
+                True
         }
 
         log_event(
@@ -751,7 +703,7 @@ def clinical_match(
         raise http_error
 
     # =====================================================
-    # PIPELINE FAILURE
+    # UNEXPECTED ERRORS
     # =====================================================
 
     except Exception as e:
@@ -766,7 +718,10 @@ def clinical_match(
 
             {
                 "error":
-                    str(e)
+                    str(e),
+
+                "traceback":
+                    traceback.format_exc()
             }
         )
 
@@ -786,16 +741,11 @@ def clinical_match(
             )
         )
 
-
 # =========================================================
 # SERVER START
 # =========================================================
 
 if __name__ == "__main__":
-
-    # ================================================
-    # IMPORTANT FIX
-    # ================================================
 
     uvicorn.run(
 

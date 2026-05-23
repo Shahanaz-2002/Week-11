@@ -3,7 +3,6 @@
 # =========================================================
 
 import os
-
 import torch
 
 
@@ -14,6 +13,15 @@ import torch
 ENVIRONMENT = os.getenv(
     "ENVIRONMENT",
     "development"
+).lower()
+
+
+# =========================================================
+# PROJECT ROOT
+# =========================================================
+
+BASE_DIR = os.path.dirname(
+    os.path.abspath(__file__)
 )
 
 
@@ -22,23 +30,17 @@ ENVIRONMENT = os.getenv(
 # =========================================================
 
 MONGO_URI = os.getenv(
-
     "MONGO_URI",
-
     "mongodb://localhost:27017"
 )
 
 DATABASE_NAME = os.getenv(
-
     "DATABASE_NAME",
-
     "dermatology_ai"
 )
 
 COLLECTION_NAME = os.getenv(
-
     "COLLECTION_NAME",
-
     "dermatology_cases"
 )
 
@@ -52,6 +54,10 @@ MONGO_SERVER_SELECTION_TIMEOUT_MS = 5000
 MONGO_CONNECT_TIMEOUT_MS = 5000
 
 MONGO_SOCKET_TIMEOUT_MS = 5000
+
+MONGO_MAX_POOL_SIZE = 10
+
+MONGO_MIN_POOL_SIZE = 1
 
 
 # =========================================================
@@ -78,13 +84,12 @@ LOW_SCORE_FILTER_THRESHOLD = 0.20
 # =========================================================
 
 # IMPORTANT:
-# USE SAME MODEL EVERYWHERE
-# embedding.py
-# embedding_store.py
-# retrieval_engine.py
+# SAME MODEL MUST BE USED IN:
+# - embedding.py
+# - embedding_store.py
+# - retrieval_engine.py
 
 EMBEDDING_MODEL_NAME = (
-
     "pritamdeka/BioBERT-mnli-snli-scinli-scitail-mednli-stsb"
 )
 
@@ -98,6 +103,10 @@ BATCH_SIZE = 16
 
 NORMALIZE_EMBEDDINGS = True
 
+ENABLE_EMBEDDING_CACHE = True
+
+EMBEDDING_CACHE_SIZE = 1000
+
 
 # =========================================================
 # DEVICE CONFIGURATION
@@ -106,11 +115,8 @@ NORMALIZE_EMBEDDINGS = True
 USE_GPU = torch.cuda.is_available()
 
 DEVICE = (
-
     "cuda"
-
     if USE_GPU
-
     else "cpu"
 )
 
@@ -131,12 +137,10 @@ MAX_KEYWORD_BOOST = 0.10
 # =========================================================
 
 API_TITLE = (
-
     "AI Dermatology Clinical Match API"
 )
 
 API_DESCRIPTION = (
-
     "AI-powered semantic dermatology retrieval "
     "using BioBERT embeddings"
 )
@@ -159,6 +163,8 @@ MAX_TEXT_INPUT_LENGTH = 2000
 MAX_QUERY_LENGTH = 2000
 
 MAX_CONTEXT_LENGTH = 5000
+
+MAX_FIELD_LENGTH = 1000
 
 
 # =========================================================
@@ -183,6 +189,8 @@ INCLUDE_SEARCHABLE_TEXT = False
 INCLUDE_EMBEDDINGS_IN_RESPONSE = False
 
 ENABLE_EXPLANATION_GENERATION = True
+
+ENABLE_RECOMMENDATIONS = True
 
 
 # =========================================================
@@ -304,9 +312,46 @@ ALLOWED_GENDERS = [
 # =========================================================
 
 DEBUG_MODE = (
-
-    ENVIRONMENT.lower() == "development"
+    ENVIRONMENT == "development"
 )
+
+
+# =========================================================
+# DEFAULT SEARCHABLE FIELDS
+# =========================================================
+
+SEARCHABLE_FIELDS = [
+
+    "chief_complaint",
+
+    "affected_body_part",
+
+    "symptoms",
+
+    "doctor_notes",
+
+    "clinical_history",
+
+    "objective_findings",
+
+    "subjective_assessment",
+
+    "physical_examination"
+]
+
+
+# =========================================================
+# SAFE FALLBACKS
+# =========================================================
+
+EMPTY_RESPONSE = {
+
+    "status": "No Match",
+
+    "matches": [],
+
+    "confidence_score": 0.0
+}
 
 
 # =========================================================
@@ -325,8 +370,50 @@ if TOP_K <= 0:
         "TOP_K must be greater than 0"
     )
 
+if MAX_MATCH_RESULTS <= 0:
+
+    raise ValueError(
+        "MAX_MATCH_RESULTS must be greater than 0"
+    )
+
 if MIN_SIMILARITY_SCORE < 0:
 
     raise ValueError(
         "MIN_SIMILARITY_SCORE invalid"
     )
+
+if LOW_SCORE_FILTER_THRESHOLD < 0:
+
+    raise ValueError(
+        "LOW_SCORE_FILTER_THRESHOLD invalid"
+    )
+
+if REQUEST_TIMEOUT_SECONDS <= 0:
+
+    raise ValueError(
+        "REQUEST_TIMEOUT_SECONDS invalid"
+    )
+
+
+# =========================================================
+# STARTUP LOG
+# =========================================================
+
+print("=" * 60)
+print("AI Dermatology Clinical Match API Configuration")
+print("=" * 60)
+
+print(f"Environment               : {ENVIRONMENT}")
+print(f"Device                    : {DEVICE}")
+print(f"Embedding Model           : {EMBEDDING_MODEL_NAME}")
+print(f"Mongo Database            : {DATABASE_NAME}")
+print(f"Mongo Collection          : {COLLECTION_NAME}")
+print(f"Top K Matches             : {TOP_K}")
+print(f"Max Match Results         : {MAX_MATCH_RESULTS}")
+print(f"Min Similarity Score      : {MIN_SIMILARITY_SCORE}")
+print(f"GPU Enabled               : {USE_GPU}")
+print(f"Debug Mode                : {DEBUG_MODE}")
+
+print("=" * 60)
+print("Configuration Loaded Successfully")
+print("=" * 60)
